@@ -1,4 +1,43 @@
+---
+title: "Example: Yamaha TX81Z editor"
+description: "The complete SysEx editor from the manual, reproduced with notes on what it gets right and what it predates."
+---
 
+Reproduced from [*The OXI E16 Manual*](https://drive.google.com/file/d/1yZn1i96nRkosn2o6eDlj5wzuErPQEe9N/view?usp=sharing)
+section 6.13 (pp. 105–109). This is the only complete
+script the manual ships, and it is the reference for how a large SysEx editor is meant to
+be structured.
+
+## What it demonstrates
+
+- **90 parameters declared as assignments** — 86 turn controls plus 4 push toggles, so the
+  App can present them for drag-and-drop rather than the user wiring each by hand.
+- **Parallel lookup tables keyed by script ID.** `param_type` selects which SysEx frame to
+  use, `param_num` supplies the address byte. Both are indexed by `enc.id`.
+- **A mutable message template.** `vced` and `aced` are built once, then bytes 5 and 6 are
+  overwritten per event — no table is allocated on the hot path.
+- **Push toggles that own their own state**, with `slots.update` giving the user the only
+  feedback they will get.
+
+## Read it with four caveats
+
+1. **No `dis` key on any assignment.** As printed, every encoder will have a numeric
+   readout painted over its label the moment it moves. Add `dis=0` — see
+   [Assignments](/oxi-e16-lua-api/assignments/).
+2. **As printed in the manual it does not compile.** `controller.onEncoderTurn` was missing
+   its closing `end`, which nests `controller.onEncoderPress` inside it — so the operator
+   toggles would never fire. The version below has the `end` restored.
+3. **Two 86-entry tables is the layout the manual itself warns against** for large editors.
+   At this size it is fine; at JV-1080 scale, pack the per-parameter data into a
+   fixed-stride string and read it with `string.byte` — see
+   [Execution model](/oxi-e16-lua-api/execution-model/).
+4. **It sends `enc.scaled` straight into a SysEx data byte.** Correct here only because
+   every declared range tops out at 99 or less. Sending `enc.value` instead would emit
+   14-bit garbage — see [Gotchas](/oxi-e16-lua-api/gotchas/).
+
+## The script
+
+```lua
 -- Yamaha TX81Z complete editor for OXI E16
 -- Per-operator params (id 1-64), voice common (65-86), op enable pushes (87-90)
 -- OP4 per-operator (id 1-16)
@@ -173,3 +212,4 @@ function controller.onEncoderPress(enc)
         slots.update(enc.index, op_en[op] == 1 and "ON" or "OFF")
     end
 end
+```

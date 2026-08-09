@@ -1,6 +1,6 @@
 -- LED color probe for the OXI E16.
 --
--- Answers open question 3 in docs/e16-lua-api.md: leds.update() documents `color`
+-- Answers open question 3 in docs/src/content/docs/open-questions.md: leds.update() documents `color`
 -- as an index 0-15, while the control editor's color setting is a 0-100 spectrum
 -- (manual p.21). The manual never reconciles the two.
 --

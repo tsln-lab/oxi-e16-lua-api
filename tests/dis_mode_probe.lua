@@ -1,6 +1,6 @@
 -- Display-mode (`dis`) probe for the OXI E16.
 --
--- Answers open question 2 in docs/e16-lua-api.md: the `dis` assignment key takes an
+-- Answers open question 2 in docs/src/content/docs/open-questions.md: the `dis` assignment key takes an
 -- integer, but the manual only ever names the display modes in words (Off, 127, 100,
 -- 1000, B63 bipolar, 9999, Always on) and never gives their numeric values.
 --

@@ -10,8 +10,8 @@
 -- clamped. The script only has to look up the CC value and the label. No manual mode,
 -- no accumulator, no rounding.
 --
--- CC numbers and value lists come from docs/NTS-1mkII_MIDIimp.txt (section 1-1, notes
--- *1-1 through *1-8).
+-- CC numbers and value lists come from the Korg NTS-1 mkII MIDI Implementation, v1.00
+-- (2024-03-18), section 1-1 and notes *1-1 through *1-8.
 
 --@assign id=1 abbr="EG"   name="EG Type"       l=0 h=4 dis=0
 --@assign id=2 abbr="FLT"  name="Filter Type"   l=0 h=6 dis=0

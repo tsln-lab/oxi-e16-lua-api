@@ -5,29 +5,48 @@ uploaded via the OXI App, and are constrained by tight memory limits.
 
 ## Before writing or reviewing any E16 Lua code
 
-Read [`docs/e16-lua-api.md`](docs/e16-lua-api.md) — the full firmware API reference
-(six globals: `controller`, `page`, `midi`, `leds`, `slots`, `var`), transcribed from
-section 6 of the official manual. It is the authoritative source for this project;
-do not guess at API surface.
+Read the API reference in [`docs/src/content/docs/`](docs/src/content/docs/) — the full
+firmware API (six globals: `controller`, `page`, `midi`, `leds`, `slots`, `var`),
+transcribed from section 6 of the official manual and corrected against hardware. These
+Markdown files are the authoritative source for this project; do not guess at API surface.
 
-Section 11 of that document lists the gotchas that cause silent bugs — check new code
-against it.
+Start with `gotchas.md` — it lists the traps that cause silent bugs. Then the page for
+whatever you are touching: `assignments.md`, `callbacks.md`, or `api/<global>.md`.
+`open-questions.md` records what is still unverified; do not present anything there as
+settled.
 
 ## Layout
 
 | Path | Purpose |
 |---|---|
-| `docs/e16-lua-api.md` | API reference — authoritative |
-| `docs/*MIDIimp.txt` | Target-synth MIDI implementation docs (CC numbers, value tables) |
-| `docs/example.lua` | The manual's TX81Z example. Reference only — not our code, do not edit |
-| `docs/OXI E16 - User Manual.pdf` | Source PDF the reference was transcribed from |
+| `docs/src/content/docs/` | **API reference — authoritative.** Plain Markdown, one page per topic |
+| `docs/` | Astro Starlight project wrapping those pages — config, deps, build output |
 | `scripts/*.lua` | Device scripts — the actual deliverables |
-| `tests/*.lua` | Hardware probes that answer open questions in the reference, §13 |
+| `tests/*.lua` | Hardware probes that answer entries in `open-questions.md` |
 | `types/e16.lua` | `---@meta` LuaLS stubs of the API, for editor completion |
 | `.luarc.json` | Points the language server at `types/`, declares the firmware globals |
 | `mise.toml` | Pins Lua for the local syntax checker (not the device runtime) |
+| `.github/workflows/deploy-docs.yml` | Builds and publishes `docs/` to GitHub Pages on push to `main` |
 
-`types/e16.lua` and `docs/e16-lua-api.md` describe the same API — **change both together.**
+`docs/` is both the Astro project root and the home of the reference. Content lives only
+in `docs/src/content/docs/`; everything else there is scaffolding. `docs/CLAUDE.md` and
+`docs/AGENTS.md` are Astro's own template instructions, not project rules.
+
+`types/e16.lua` and the pages in `docs/src/content/docs/` describe the same API —
+**change both together.**
+
+Cross-page links must be absolute **and include the base path**:
+`/oxi-e16-lua-api/api/slots/`. The site deploys to GitHub Pages as a project site, so
+everything is served under `/oxi-e16-lua-api/`, and Astro does **not** prefix links
+written in Markdown. A link missing the prefix 404s in production while looking fine in a
+casual read. Run a build and check for dead links after editing:
+
+```bash
+cd docs && npm run build
+grep -rho 'href="/oxi-e16-lua-api/[a-z0-9/-]*/"' dist | sort -u \
+  | sed 's|href="/oxi-e16-lua-api||;s|"||' \
+  | while read u; do [ -f "dist${u}index.html" ] || echo "DEAD $u"; done
+```
 
 Callbacks in `types/e16.lua` are declared as `@field` on a class, not defined as
 functions — keep it that way when adding new callbacks. `duplicate-set-field` is also
@@ -59,6 +78,8 @@ its parameter name and its current value at the same time — pick one per scrip
 
 ```bash
 mise exec -- luac -p scripts/nts-1.lua   # syntax check
+cd docs && npm run dev                   # preview the docs site
+cd docs && npm run build                 # render to docs/dist/
 ```
 
 Use the `mise exec --` form: `mise.toml` pins Lua for this directory, but a bare `luac`
@@ -70,5 +91,5 @@ the only automated verification available.
 
 Everything else has to be confirmed on hardware. When a question can only be answered that
 way, write a probe in `tests/`, tell the user exactly what to look at, and record the
-result in `docs/e16-lua-api.md` — do not guess, and do not try to answer it from the
-manual, which is silent on all the remaining open questions.
+result on the relevant page under `docs/src/content/docs/` — do not guess, and do not try
+to answer it from the manual, which is silent on all the remaining open questions.
