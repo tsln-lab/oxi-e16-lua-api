@@ -8,7 +8,9 @@
     "midi",
     "leds",
     "slots",
-    "var"
+    "var",
+    "system",
+    "stepped_install"
   ],
   "diagnostics.disable": ["lowercase-global", "duplicate-set-field"]
 }

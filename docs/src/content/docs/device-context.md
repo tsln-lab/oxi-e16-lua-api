@@ -14,12 +14,29 @@ push. Destination 2 is unavailable if destination 1 is `Off`. This is why assign
 
 ## MIDI ports (p.18)
 
-- The E16 exposes **Port A and Port B**, each with 16 channels. They are separate logical
-  ports that **share the same physical output**; DAWs may show them as 1 and 2.
-- Port and channel can be set **at page level** (applies to all controls on the page) or
-  **per control destination**, which overrides the page setting.
-- In Lua, `output` `0` means all outputs. The manual does not state which integers map to
-  Port A / Port B — see [Open questions](/oxi-e16-lua-api/open-questions/).
+There are **two axes**, and conflating them is what makes the Lua `output` argument
+confusing.
+
+**Transport** — the physical connection: TRS MIDI, USB, or Bluetooth LE.
+
+**Port** — logical ports A and B, each with 16 channels. They **share the same physical
+output**; DAWs may show them as 1 and 2.
+
+The per-destination *Output* setting picks a combination of the two, and enumerates the
+same ten options in all twelve control tables (pp. 26–33):
+
+> Same as Page, TRS1, TRS2, USB1, USB2, USB3, BLE, ALL-BLE (all except bluetooth),
+> ALL-USB (all except USB), Off
+
+Page level drops *Same as Page* and leads with **All**. Set it at page level to cover every
+control on the page, or per control destination to override that.
+
+`USB3` has no TRS or BLE counterpart, so the grid is not square — another reason not to
+treat the numbering as "port A = 1, port B = 2".
+
+In Lua, `output` `0` means all outputs and nothing else is specified. The likely mapping to
+the list above is on [midi](/oxi-e16-lua-api/api/midi/#the-output-argument), marked as the
+hypothesis it is.
 
 ## Encoder Mode — the device has modes Lua cannot reach
 
@@ -45,7 +62,7 @@ The manual prints "B63 bipolar +/-" **twice** in this list, in all three places 
 **The `dis` assignment key takes an int, but the manual never gives the mapping from these
 labels to integers.**
 
-Partial hardware result, 2026-08-09, via [`dis_mode_probe.lua`](../dis_mode_probe.lua) —
+Partial hardware result, 2026-08-09, via `tests/dis_mode_probe.lua` —
 sixteen controls identical but for `dis`, all parked at the same internal midpoint:
 
 | `dis` | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 |

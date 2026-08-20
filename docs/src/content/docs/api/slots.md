@@ -3,7 +3,8 @@ title: "slots"
 description: "Override the text under an encoder, and how label precedence works."
 ---
 
-By default each encoder shows its 4-character `abbr`.
+By default each encoder shows the shared 4-character `abbr` from its control configuration
+— **including Script controls in manual mode**, which does not suppress the label.
 
 ## `slots.update(index, text)`
 
@@ -47,10 +48,45 @@ never drawn at all ([Assignments (--@assign)](/oxi-e16-lua-api/assignments/)), s
 labelled with text — no overlay, no `enc.index`, nothing to reset. Reach for the overlay
 when the text must change per encoder *position* rather than per script ID.
 
-**An overlay never expires on its own.** The callback set is complete — `onInit`,
-`onEncoderTurn`, `onEncoderPress`, `onSysex`, `onPageChange`, `onVarChange` — and none of
-them is a timer or tick. A script cannot tell that turning has stopped, so a label cannot
-revert "after a moment". It only changes when something else calls `slots.update` or
-`slots.reset`. Patterns that work instead: clear the previous overlay when a *different*
+**An overlay never expires on its own.** It changes only when something calls
+`slots.update` or `slots.reset` again.
+
+Until API 1.2.0 that made "show the value while turning, then revert" impossible: every
+callback was driven by a user action, so a script could not tell that turning had *stopped*.
+**[`system.update()`](/oxi-e16-lua-api/api/system/) closes that gap** — a tick can count
+down and reset the label itself:
+
+```lua
+--@assign id=1 abbr="Cut" name="Cutoff" l=0 h=127 dis=0
+
+local HOLD_TICKS = 40          -- 40 x 25 ms = 1 s
+local countdown, slot = 0, nil
+
+function page.onInit()
+  system.setUpdateRate(25)
+end
+
+function controller.onEncoderTurn(enc)
+  if enc.id ~= 1 then return end
+  midi.sendCC(0, 0, 74, enc.scaled)
+  slots.update(enc.index, tostring(enc.scaled))
+  slot, countdown = enc.index, HOLD_TICKS
+end
+
+function system.update()
+  if countdown == 0 then return end
+  countdown = countdown - 1
+  if countdown == 0 then
+    slots.reset(slot)          -- back to "Cut"
+  end
+end
+```
+
+This gets a 4-character label doing both jobs — parameter name at rest, live value while
+moving — which the `dis` readout cannot do without painting over the label permanently.
+The tick is unverified on hardware; the timing is a plain counter, so a slow tick just means
+a longer revert.
+
+Event-driven alternatives that need no timer: clear the previous overlay when a *different*
 encoder is turned (so only the last-touched control shows transient text), clear on
 `onEncoderPress`, or clear on `onPageChange`.

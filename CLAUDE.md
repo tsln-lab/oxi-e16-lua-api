@@ -6,9 +6,15 @@ uploaded via the OXI App, and are constrained by tight memory limits.
 ## Before writing or reviewing any E16 Lua code
 
 Read the API reference in [`docs/src/content/docs/`](docs/src/content/docs/) — the full
-firmware API (six globals: `controller`, `page`, `midi`, `leds`, `slots`, `var`),
-transcribed from section 6 of the official manual and corrected against hardware. These
-Markdown files are the authoritative source for this project; do not guess at API surface.
+firmware API (seven globals: `controller`, `page`, `midi`, `leds`, `slots`, `var`,
+`system`), transcribed from OXI's *Lua Scripting API Guide v1.2.0* and corrected against
+hardware. These Markdown files are the authoritative source for this project; do not guess
+at API surface.
+
+The upstream PDF lives at
+`/home/mateo/Projects/manuals/sources/LUA_SCRIPTING_API_GUIDE V 1.2.0.pdf`, converted to
+Markdown alongside it in `output/`. It supersedes section 6 of the user manual, which is
+still the source for non-API device behaviour.
 
 Start with `gotchas.md` — it lists the traps that cause silent bugs. Then the page for
 whatever you are touching: `assignments.md`, `callbacks.md`, or `api/<global>.md`.
@@ -21,7 +27,10 @@ settled.
 |---|---|
 | `docs/src/content/docs/` | **API reference — authoritative.** Plain Markdown, one page per topic |
 | `docs/` | Astro Starlight project wrapping those pages — config, deps, build output |
-| `scripts/*.lua` | Device scripts — the actual deliverables |
+| `src/*.lua` | Per-synth script sources — **edit these** |
+| `src/lib/*.lua` | Shared code, textually inlined at build time |
+| `build.lua` | Inlines includes and hoists assignments, `src/` → `scripts/` |
+| `scripts/*.lua` | **Generated. Do not edit.** Upload these to the device |
 | `tests/*.lua` | Hardware probes that answer entries in `open-questions.md` |
 | `types/e16.lua` | `---@meta` LuaLS stubs of the API, for editor completion |
 | `.luarc.json` | Points the language server at `types/`, declares the firmware globals |
@@ -74,10 +83,30 @@ Two rules established on hardware, both non-obvious and both cheap to get wrong:
 Encoder labels are **4 characters**, and each encoder has only one. A control cannot show
 its parameter name and its current value at the same time — pick one per script.
 
+### Sharing code between scripts
+
+The device has no module system — a scene loads exactly one file and there is nothing to
+`require()` from. Sharing is textual inlining, done by `build.lua`:
+
+```lua
+--!include lib/stepped.lua    -- path relative to src/
+```
+
+Includes are emitted before the including file's body, so their locals are in scope.
+`--@assign` directives are hoisted to the top of the output, where the App expects them.
+Library files must not declare assignments and cannot include each other.
+
+A shared helper costs bytes in **every** script that inlines it, so keep `lib/` lean —
+the budget is 8000 bytes of uploaded size per built script.
+
+Anything a `lib/` file exposes to source files needs adding to `diagnostics.globals` in
+`.luarc.json`, or the language server flags it as undefined in `src/`.
+
 ## Checking work
 
 ```bash
-mise exec -- luac -p scripts/nts-1.lua   # syntax check
+mise exec -- lua build.lua                # src/ -> scripts/, reports size vs the limit
+mise exec -- luac -p scripts/nts-1.lua    # syntax check the built output
 cd docs && npm run dev                   # preview the docs site
 cd docs && npm run build                 # render to docs/dist/
 ```

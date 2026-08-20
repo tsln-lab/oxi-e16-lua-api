@@ -1,35 +1,72 @@
 ---
 title: "Open questions"
-description: "Questions the manual does not settle, and what it would take to answer each."
+description: "Questions the documentation does not settle, and what it would take to answer each."
 ---
 
-Things the manual does not settle. Resolve by testing on hardware before relying on them.
+Things the 1.2.0 guide does not settle. Resolve by testing on hardware before relying on
+them.
 
-1. **Lua `output` port numbering.** `0` = all outputs is documented. Whether `1`/`2` map
-   to Port A/B is not stated anywhere.
-2. **`dis` — resolved 2026-08-09, as far as it is observable.** Setting `dis` suppresses
+## Opened or reopened by 1.2.0
+
+1. **LED `color` is now a 0–100 rotation.** 1.0.0 documented a 0–15 palette index, and the
+   measured 16-entry table on [leds](/oxi-e16-lua-api/api/leds/) was taken under that
+   firmware. Unknown: what 16–100 render as, whether the Lua scale and the editor's 0–100
+   color setting are now the same scale, and whether the old readings still hold at all.
+   **Re-run `tests/led_color_probe.lua`** — updated for the new
+   signature; it sweeps 0–100 across the sixteen rings in six passes.
+2. **Does writing `v` transmit?** Whether `controller.setByIndex(page, index, "v", …)`
+   makes the firmware send an ordinary control's configured MIDI message, or only stores
+   the value — and whether it reaches non-script controls at all. This decides whether a
+   script-driven LFO can modulate a CC knob the user configured in the editor, or must
+   know and send every CC itself ([Patterns](/oxi-e16-lua-api/patterns/)). The guide is
+   silent and its examples always send explicitly, hinting at "stores only".
+   **Probe: `tests/write_transmit_probe.lua`**, about five minutes with a loopback cable.
+3. **What `enc.id` holds for an ordinary control.** `onEncoderTurn` now fires for
+   non-script controls, and the guide says to identify them by `enc.page` / `enc.index`
+   without saying what `id` contains — `0`, `nil`, or a stale value. A handler guarding with
+   `if enc.id == 1` behaves very differently if unclaimed controls report `0` versus `nil`
+   in an arithmetic comparison. Probe: one script control and one plain CC control on the
+   same page, log both via a `slots.update` of `tostring(enc.id)`.
+4. **Does `controller.setControls` still exist?** The guide names it once as a runtime
+   configuration option but gives it no section, and states that unlisted functions do not
+   exist. Its `i` key is gone from the property table. Probe: call it and see whether the
+   page reconfigures.
+5. **`midi.sendMidi` channel precedence.** The call takes a `channel` argument *and* a
+   `status` byte that already contains a channel nibble. Which wins when they disagree is
+   unstated. Probe: send `sendMidi(0, 5, 0x90, 60, 100)` and read the channel on the
+   MIDI monitor of a receiving device.
+6. **Whether `system.update()` can starve encoder handling.** The floor is 20 ms; the guide
+   does not say what happens if the handler takes longer than the interval, or whether
+   ticks are dropped or queued.
+
+## Carried over, still open
+
+7. **Lua `output` port numbering — reframed 2026-08-11.** `0` = all outputs is the only
+   value either document gives. The question is *not* "which integer is Port A vs Port B":
+   the editor's Output setting selects **transport × port** from a ten-entry list (TRS1,
+   TRS2, USB1, USB2, USB3, BLE, ALL-BLE, ALL-USB, Off), and `output` almost certainly
+   indexes that. The hypothesised mapping is on
+   [midi](/oxi-e16-lua-api/api/midi/#the-output-argument).
+   **Probe: `tests/output_port_probe.lua`** — one press sends a different CC number on each
+   index, so every connected receiver identifies which index reached it. Needs at least TRS
+   and USB connected to something that shows incoming CC.
+8. **`dis` — resolved 2026-08-09, as far as it is observable.** Setting `dis` suppresses
    the numeric readout; omitting it lets the firmware draw numbers over the label. `dis=4`
    gives a bipolar ring, eight values give a unipolar ring, seven blank it ([Assignments (--@assign)](/oxi-e16-lua-api/assignments/)).
-   Not observable, and probably not worth chasing: which numeric scale (127 / 100 / 1000 /
-   9999) a given value denotes — on a script control no number is ever drawn once `dis` is
-   set, so the distinction has no visible effect.
-   **Working conclusion: on a script control, `dis` affects only LED ring rendering** —
-   `4` is bipolar, eight values are unipolar, seven blank the ring. The scale distinctions
-   (127 / 100 / 1000 / 9999) appear to have no visible effect there.
+   1.2.0 still documents `dis` only as "display mode for the turn/push action" with no
+   mapping, so the hardware findings remain the only source.
    Remaining sub-question: whether the readout suppression is per-control or per-scene —
    put a plain CC control on a spare encoder **inside the script's scene** and turn it.
    Numbers appear → per-control. Nothing → attaching a script suppresses readouts
    scene-wide, which would be a significant gotcha for mixed pages.
-3. **LED colors — mostly resolved 2026-08-09.** All 16 palette entries are measured on
-   hardware ([leds](/oxi-e16-lua-api/api/leds/)), and color is independent of `value` — rings hold their color across the
-   full fill sweep. One piece still open: **how the 0–15 Lua index relates to the editor's
-   0–100 setting**, if at all. The editor figure shows 11 colors against Lua's 16, and the
-   two sets do not match in content, so they are probably separate palettes rather than
-   two resolutions of one. Settling it needs a probe that sets a control's editor color
-   and finds which Lua index renders identically. Also unresolved: whether the editor
-   setting accepts all 101 values or only the 11 labelled steps.
-4. **Script size limit.** 4000 bytes (p.88) vs 8000/8192 (p.87). See [Execution model](/oxi-e16-lua-api/execution-model/).
-5. **Per-scene variable capacity.** Registrations past the limit are silently dropped, but
+9. **Per-scene variable capacity.** Registrations past the limit are silently dropped, but
    the limit is never given.
-6. **`accel` beyond 6.** Whether the large-step modes are reachable with higher `accel`
-   values, or not at all from Lua.
+10. **`accel` beyond 6.** Whether the large-step modes (`LSp2`/`LSp4`/`LSp6`) are reachable
+   with higher `accel` values, or not at all from Lua.
+
+## Closed by 1.2.0
+
+- **Script size limit** — 8000 bytes. The old manual's 4000 vs 8000/8192 contradiction is
+  resolved by the guide documenting the editor counter as `uploaded-size / 8000`.
+- **Whether the API has any timer** — it does now: `system.update()`.
+- **Whether `is_held` works** — it does not; it is reserved and always `false`.

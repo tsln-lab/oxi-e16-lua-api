@@ -1,46 +1,103 @@
 ---
 title: "leds"
-description: "Take over the LED rings, including the measured 16-colour palette."
+description: "Take over the LED rings. The update signature changed in 1.2.0 — it now takes a script ID."
 ---
 
 By default the firmware draws each ring from the control's internal value. Override it to
 show quantized steps, a custom color, or an independent visualization.
 
-## `leds.update(index, value [, color])`
+:::caution[Changed in API 1.2.0]
+`leds.update` now takes a **script ID**, not an encoder position. The old index-based
+behaviour moved to the new `leds.updateByIndex`. `leds.reset` still takes an **index**.
+Code written against 1.0.0 that called `leds.update(enc.index, …)` now addresses a script
+ID that probably belongs to a different control — or to nothing at all, in which case it
+silently does nothing.
+
+The `color` argument also changed: it is documented as a **0–100 rotation**, where 1.0.0
+documented a 0–15 palette index. See [Colors](#colors) — the measured palette below
+predates this and needs re-running.
+:::
+
+## `leds.update(id, value [, color])`
 
 | Param | Range | Note |
 |---|---|---|
-| `index` | 1–16 | Encoder position |
+| `id` | — | **Script ID** from `--@assign` |
 | `value` | 0–16383 | Ring fill; 16383 = full ring |
-| `color` | 0–15 | Optional, defaults to 0 |
+| `color` | 0–100 | Color rotation. Optional, defaults to 0 |
 
-**Calling this takes ownership** — the firmware stops drawing that ring until `leds.reset`.
+Takes ownership of the ring for every **current-page** Script destination carrying that
+ID. Note the asymmetry with [`controller.set`](/oxi-e16-lua-api/api/controller/), which
+searches *all* pages — `leds.update` is current-page only.
 
-## Palette (measured on hardware, 2026-08-09)
+```lua
+leds.update(201, 8192, 10)
+```
 
-`color` is a **discrete palette, not a hue ramp** — the sequence is not monotonic
-(purple, four blues, pink, yellows, peaches, red, pink, magenta, blue, cyan, green).
+## `leds.updateByIndex(index, value [, color])`
 
-The control editor's 0–100 "color spectrum" (manual p.21) is **also not a hue ramp**.
-The figure is **11 discrete swatches at 10-step intervals**, not a gradient — extracted
-from the PDF's vector fills as 11 equal-width rectangles in a row:
+The same thing addressed by physical encoder position, 1–16. This is what `leds.update`
+used to be.
 
-| Setting | 0 | 10 | 20 | 30 | 40 | 50 | 60 | 70 | 80 | 90 | 100 |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| Swatch | `#5A58FF` | `#60DBFF` | `#BBFAFE` | `#D6C3FF` | `#75FF42` | `#FCABFF` | `#EF004C` | `#CB37FF` | `#5EF3FF` | `#93FF00` | `#70FFA1` |
-| | blue | cyan | pale cyan | lavender | green | pale pink | red | purple | cyan | yellow-green | mint |
+```lua
+leds.updateByIndex(15, 8192, 10)
+```
 
-**The two scales cannot be a simple resampling of each other: the editor figure shows
-11 colors, the Lua index has 16.** Nor do their contents line up — the Lua palette is
-heavy on blues (five of sixteen) while the figure has one blue and three cyans. Treat
-them as separate palettes until proven otherwise.
+## Batch forms
 
-Two caveats on the figure: the manual never says whether the setting accepts only those
-11 labelled values or all 101, and printed CMYK swatches approximate LED output poorly,
-so the hex values above are indicative of hue only.
+Both functions accept an array of entries instead of positional arguments, so a whole
+page's rings can be set in one call:
 
-Pick colors from the measured table below by index; do not compute them from the 0–100
-setting.
+```lua
+leds.update({
+  {201, 8192, 10},
+  {204, 4096,  4},
+  {205, 12000},      -- color defaults to 0
+})
+
+leds.updateByIndex({
+  {1, 8192, 10},
+  {3, 4096,  4},
+  {4, 12000},
+})
+```
+
+Entries that are not tables, or that lack numeric target and value fields, are **ignored
+silently**. Values and colors are clamped to their valid ranges rather than rejected.
+
+## `leds.reset(index)`
+
+**Takes an encoder position, 1–16** — not a script ID, in either version of the API. Hands
+the ring back; the firmware resumes drawing it from the control's internal value on the
+next render.
+
+```lua
+leds.reset(15)
+```
+
+## Ownership
+
+Once either update function targets an encoder, the script owns that physical ring in the
+normal encoder view until `leds.reset`. Menus and other special views may temporarily draw
+their own ring state over it.
+
+**The override is not page-specific** — it is stored by physical position, so a ring taken
+on encoder 3 stays taken on encoder 3 after a page change. Reset or replace it from
+`page.onPageChange`.
+
+Loading or clearing a script drops all LED-ring overrides, along with slot labels and the
+title override.
+
+## Colors
+
+`color` is documented in 1.2.0 as a **0–100 rotation**, the same numeric range as the
+control editor's color setting (manual p.21).
+
+**The palette table below was measured on the pre-1.2.0 firmware**, when `color` was
+documented as a 0–15 index and `leds.update` took a position. It is kept because the
+observations were real, but treat it as **stale**: it says nothing about what values 16–100
+now render as, and the 1.0.0 firmware may have been interpreting the argument differently
+from the current one.
 
 | Index | Color | | Index | Color |
 |---|---|---|---|---|
@@ -53,22 +110,30 @@ setting.
 | 6 | light yellow | | 14 | cyan |
 | 7 | yellow | | 15 | green |
 
-Measured with [`led_color_probe.lua`](../led_color_probe.lua); all 16 entries confirmed.
+Measured 2026-08-09 with `tests/led_color_probe.lua`, since updated for
+the 1.2.0 signature. Colour was independent of `value` — rings held their color across the
+full fill sweep, which is the one finding likely to survive.
 
-**A third of the palette is blue.** Indices 1, 2, 3, 4 and 13 are all blues, and 5 and 11
-are both pinks — seven of sixteen entries fall into two clusters. The reliably distinct
-set is **0, 7, 9, 10, 12, 14, 15** (purple, yellow, peach, red, magenta, cyan, green),
-plus one blue and one pink. That is **nine usable colors**, not sixteen — worth knowing
-before designing a page that color-codes more than nine things.
+Two things that argued against the old 0–15 index being a slice of a hue ramp still stand:
+the sequence was not monotonic, and the control editor's own "color spectrum" figure is
+**11 discrete swatches at 10-step intervals**, not a gradient:
+
+| Setting | 0 | 10 | 20 | 30 | 40 | 50 | 60 | 70 | 80 | 90 | 100 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Swatch | `#5A58FF` | `#60DBFF` | `#BBFAFE` | `#D6C3FF` | `#75FF42` | `#FCABFF` | `#EF004C` | `#CB37FF` | `#5EF3FF` | `#93FF00` | `#70FFA1` |
+| | blue | cyan | pale cyan | lavender | green | pale pink | red | purple | cyan | yellow-green | mint |
+
+Extracted from the PDF's vector fills. Printed CMYK approximates LED output poorly, so
+these are indicative of hue only, and the manual never says whether the setting accepts all
+101 values or only the 11 labelled steps. Now that Lua and the editor share a 0–100 range,
+**re-running the probe should settle whether they are the same scale** — see
+[Open questions](/oxi-e16-lua-api/open-questions/).
+
+## Example
 
 ```lua
--- Show 4 discrete steps on encoder 15
+-- Show 4 discrete steps on the control with script ID 1
 local step = (enc.scaled * 4) // 128
 if step > 3 then step = 3 end
-leds.update(15, step * 16383 // 3)
+leds.update(1, step * 16383 // 3)
 ```
-
-## `leds.reset(index)`
-
-Hands the ring back; the firmware resumes drawing from the control's internal value on the
-next render.

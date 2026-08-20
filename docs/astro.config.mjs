@@ -37,12 +37,14 @@ export default defineConfig({
 						{ label: 'slots', slug: 'api/slots' },
 						{ label: 'var', slug: 'api/var' },
 						{ label: 'page', slug: 'api/page' },
+						{ label: 'system', slug: 'api/system' },
 					],
 				},
 				{
 					label: 'In practice',
 					items: [
 						{ label: 'Gotchas', slug: 'gotchas' },
+						{ label: 'Patterns', slug: 'patterns' },
 						{ label: 'Device context', slug: 'device-context' },
 						{ label: 'Example: TX81Z editor', slug: 'example-tx81z' },
 						{ label: 'Open questions', slug: 'open-questions' },

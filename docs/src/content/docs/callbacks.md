@@ -1,6 +1,6 @@
 ---
 title: "Callbacks"
-description: "The six callbacks the firmware calls, and the payloads they carry."
+description: "The seven callbacks the firmware calls, and the payloads they carry."
 ---
 
 Functions **you define** on the global objects; the firmware calls them.
@@ -8,7 +8,8 @@ Functions **you define** on the global objects; the firmware calls them.
 ## `page.onInit()`
 
 Called once after the script loads and the Lua environment is ready. Use it to set the
-title, initialise state, register variables, and request data from external gear.
+title, initialise state, register variables, enable periodic updates, and request data from
+external gear.
 
 ```lua
 function page.onInit()
@@ -19,17 +20,40 @@ end
 
 ## `controller.onEncoderTurn(enc)`
 
-Called when a script-assigned encoder is turned. `enc` fields:
+Called when a **turn destination receives a value update**. A physical turn is the normal
+source, but recorder playback, the Random special function, group moves, and other internal
+value processing also fire it.
+
+:::note[Widened in API 1.2.0]
+It is no longer limited to script-assigned encoders — **ordinary controls fire it too**. A
+script on the scene can therefore observe every encoder on the page, not just the ones its
+assignments claim. For an ordinary control there is no meaningful `enc.id`; identify it by
+`enc.page` and `enc.index`.
+:::
+
+With two destinations enabled, each destination is handled independently. With Change
+Destination enabled, only the active one is handled.
+
+**When it fires depends on the mode:**
+
+| Control | Timing | What `value`/`scaled` hold |
+|---|---|---|
+| Ordinary, or managed Script | *after* the value is stored, and **only when the mapped output value changes** | the newly committed value |
+| Manual Script | *before* any automatic value change | the currently stored value |
+
+That "only when the mapped output changes" rule is useful rather than annoying: on a
+control declared `l=0 h=4`, several detents of physical movement produce one callback per
+option, not one per detent.
 
 | Field | Type | Description |
 |---|---|---|
-| `enc.id` | int | The control's script ID |
+| `enc.id` | int | Script ID for a Script destination. Not meaningful for ordinary controls |
 | `enc.index` | int | Encoder position on the page (1–16) |
 | `enc.page` | int | Current page (1–12) |
-| `enc.increment` | int | Raw turn direction and speed: ±1, ±2, ±4 or ±8 depending on turn speed |
+| `enc.increment` | int | Raw physical turn direction and speed, normally ±1, ±2, ±4 or ±8. **An independent input signal, not the provenance of `enc.value`** — it is `0` when no physical increment exists, e.g. on a group slave turn |
 | `enc.value` | int | Internal 14-bit value (0–16383) |
-| `enc.scaled` | int | Output value mapped to the control's `l`/`h` range |
-| `enc.is_held` | bool | Whether the encoder button is held down |
+| `enc.scaled` | int | `enc.value` mapped to this destination's `l`/`h` range |
+| `enc.is_held` | bool | **Reserved; currently always `false`.** See below |
 
 ```lua
 function controller.onEncoderTurn(enc)
@@ -39,10 +63,18 @@ function controller.onEncoderTurn(enc)
 end
 ```
 
+:::danger[`enc.is_held` does not work]
+1.2.0 documents it as *"reserved for held-turn detection; currently always `false`"*. Any
+branch on it takes the false path, always, with no error. **Hold-and-turn cannot be
+implemented this way** — see [Patterns](/oxi-e16-lua-api/patterns/) for what to do instead.
+:::
+
 ## `controller.onEncoderPress(enc)`
 
 Called when a script-assigned encoder is pressed. `enc` carries **only**
 `id`, `index`, `page`, `value`, `scaled` — **no `increment`, no `is_held`.**
+
+There is no release event.
 
 ## `controller.onSysex(bytes)`
 
@@ -64,8 +96,9 @@ end
 
 Called when the user switches pages. Both arguments are 1-based page indices.
 
-**LED and label overlays are NOT cleared automatically on page change.** Tear down the
-old page's overlays and build the new page's here.
+**LED and label overlays are NOT cleared automatically on page change.** They are stored by
+physical encoder position, not by page, so an override left on encoder 3 reappears on
+encoder 3 of the new page. Tear down the old page's overlays and build the new page's here.
 
 ```lua
 function page.onPageChange(prev, curr)
@@ -86,3 +119,22 @@ via the device's variable menu. `name` is the registered variable name (string).
 
 **Not** called for script-initiated `var.set`, so a handler can write variables without
 recursing.
+
+## `system.update()`
+
+**New in API 1.2.0.** Called periodically once `system.setUpdateRate(ms)` has enabled
+polling, at 20–1000 ms intervals. Takes no arguments.
+
+This is the only callback not driven by a user action — it is what makes animation,
+timeouts and reverting labels possible. **If it raises an error the firmware disables
+periodic updates for the script**, silently. See [`system`](/oxi-e16-lua-api/api/system/).
+
+```lua
+function page.onInit()
+  system.setUpdateRate(20)
+end
+
+function system.update()
+  -- roughly every 20 ms
+end
+```

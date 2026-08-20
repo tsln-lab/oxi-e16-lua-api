@@ -20,7 +20,7 @@ they are the standard way to declare the initial setup.
 
 | Key | Type | Required | Default | Meaning |
 |---|---|---|---|---|
-| `id` | int | **yes** | — | Script ID. Identifies the control in callbacks as `enc.id`. |
+| `id` | int | **yes** | — | Script ID. Identifies this **turn destination or push action** in callbacks as `enc.id`. |
 | `abbr` | string | * | — | On-device encoder label, max 4 chars. If omitted, derived from the first 4 chars of `name`. |
 | `name` | string | * | — | Display name in the App's parameter list. If omitted, falls back to `abbr`. |
 | `desc` | string | no | — | Description shown in the App only, never on the device. |
@@ -39,6 +39,15 @@ they are the standard way to declare the initial setup.
 **Label caveat:** each encoder has only one label. When two turn destinations share an
 encoder (`d=1` and `d=2` with `swap=true`), the App uses the `abbr` of whichever parameter
 was dropped last. Give both assignments the same `abbr`.
+
+**An `id` names a destination, not an encoder.** Destination 1 and destination 2 of the same
+encoder may carry different IDs, and every ID-based API call resolves to the destination
+holding that ID — **all of them, if more than one does**. Reusing an ID across pages is a
+deliberate way to move several controls at once; reusing it by accident is action at a
+distance. See [controller](/oxi-e16-lua-api/api/controller/).
+
+Assignment directives are ordinary Lua comments, so they are stripped before upload and
+**do not count toward the 8000-byte script limit**. Declare as many as the script needs.
 
 ## Acceleration modes (`accel`)
 

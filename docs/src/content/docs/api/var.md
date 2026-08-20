@@ -34,6 +34,11 @@ existing name with a different type does **not** update the type — the origina
 Returns the value typed appropriately (integer / boolean / float), or **`nil` if never
 registered**. Fast enough for hot paths — names are interned firmware-side.
 
+The LuaLS stub types this as `any` rather than a union of the three. A union makes every
+call site a type error the moment the value is used in arithmetic or passed to a typed
+parameter, and the real type is only knowable from the matching `var.register` call.
+Guard the `nil` case yourself — `var.get("channel") or 1`.
+
 ## `var.set(name, value)`
 
 Updates an already-registered variable; the value is coerced to the registered type.

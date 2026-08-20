@@ -4,9 +4,14 @@ description: "The complete SysEx editor from the manual, reproduced with notes o
 ---
 
 Reproduced from [*The OXI E16 Manual*](https://drive.google.com/file/d/1yZn1i96nRkosn2o6eDlj5wzuErPQEe9N/view?usp=sharing)
-section 6.13 (pp. 105–109). This is the only complete
-script the manual ships, and it is the reference for how a large SysEx editor is meant to
-be structured.
+section 6.13 (pp. 105–109), and carried forward unchanged into the *Lua Scripting API Guide
+v1.2.0*. It is the reference for how a large SysEx editor is meant to be structured.
+
+The 1.2.0 guide ships two further examples: a general API showcase, and a second one
+demonstrating manual value ownership, two destinations sharing a script ID, batched LED
+overrides and `system.update()` polling. Their techniques are covered on
+[Patterns](/oxi-e16-lua-api/patterns/), [leds](/oxi-e16-lua-api/api/leds/) and
+[system](/oxi-e16-lua-api/api/system/).
 
 ## What it demonstrates
 
@@ -24,10 +29,11 @@ be structured.
 1. **No `dis` key on any assignment.** As printed, every encoder will have a numeric
    readout painted over its label the moment it moves. Add `dis=0` — see
    [Assignments](/oxi-e16-lua-api/assignments/).
-2. **As printed in the manual it does not compile.** `controller.onEncoderTurn` was missing
-   its closing `end`, which nests `controller.onEncoderPress` inside it — so the operator
-   toggles would never fire. The version below has the `end` restored.
-3. **Two 86-entry tables is the layout the manual itself warns against** for large editors.
+2. **The manual's printing did not compile.** `controller.onEncoderTurn` was missing its
+   closing `end`, which nested `controller.onEncoderPress` inside it, so the operator
+   toggles could never fire. **Fixed in the 1.2.0 guide**, and restored below.
+3. **Two 86-entry tables is the layout the documentation itself warns against** for large
+   editors.
    At this size it is fine; at JV-1080 scale, pack the per-parameter data into a
    fixed-stride string and read it with `string.byte` — see
    [Execution model](/oxi-e16-lua-api/execution-model/).
