@@ -66,16 +66,15 @@ them.
 
 ## Raised by the Live integration
 
-11. **Does SysEx sent over USB reach `controller.onSysex`?** The callback is documented as
-   firing "when the E16 receives a SysEx message", and 1.2.0 does not say which input it
-   listens on either. Everything that drives the E16 from a computer depends on it —
-   [Ableton Live](/oxi-e16-lua-api/ableton-live/) among them — and no other callback can
-   carry data inbound: `onSysex` is the only one that receives MIDI at all, which is why
-   incoming clock is invisible to a script ([Patterns](/oxi-e16-lua-api/patterns/)).
-   **Probe: [`tests/sysex_in_probe.lua`](../sysex_in_probe.lua)**, which counts inbound
-   messages in the header, so it separates "nothing arrives" from "the payload is wrong".
-   Sub-question if it works: does it hold for every transport in the `output` list
-   (question 7), or only some?
+11. **Does SysEx over USB reach `controller.onSysex`? — resolved 2026-08-20: yes.**
+   Measured with [`sysex_in_probe.lua`](../sysex_in_probe.lua). A message sent from a host
+   utility arrives, successive messages accumulate, the `bytes` table includes the `0xF0` /
+   `0xF7` framing as documented, and `0x7D` passes through unaltered so dispatching on the
+   ID byte works. Recorded on [Callbacks](/oxi-e16-lua-api/callbacks/); it is what makes
+   [Ableton Live](/oxi-e16-lua-api/ableton-live/) possible at all.
+   Remaining sub-questions: whether the other transports in the `output` list (question 7)
+   also deliver inbound SysEx — only USB has been tried — and whether a control surface's
+   output in a DAW reaches the script by the same path a standalone utility does.
 12. **How does a detent's step size relate to a destination's `l`/`h` range?** Two
    hypotheses, with opposite consequences for high-resolution control:
    - *The step scales to the range* — one detent is one output step, so `h=16383` needs

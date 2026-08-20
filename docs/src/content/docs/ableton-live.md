@@ -162,12 +162,14 @@ when the mapped output value changes** ([Callbacks](/oxi-e16-lua-api/callbacks/)
 
 ## Limits and what is not done yet
 
-- **Unverified on hardware.** Whether SysEx sent over USB reaches `controller.onSysex` at
-  all, and on which transport, is
-  [open question 11](/oxi-e16-lua-api/open-questions/). Run
+- **Partly verified on hardware.** The transport works: SysEx sent from a computer over
+  USB reaches `controller.onSysex`, framing intact and `0x7D` unaltered, measured
+  2026-08-20 ([Callbacks](/oxi-e16-lua-api/callbacks/)). What has *not* been confirmed is
+  that Live's control-surface output arrives by the same path as a standalone utility, or
+  that the round trip behaves end to end. If something misbehaves, run
   [`tests/sysex_in_probe.lua`](https://github.com/tsln-lab/oxi-e16-lua-api/blob/main/tests/sysex_in_probe.lua)
-  first — it counts inbound messages in the header, so it separates "the link is dead"
-  from "the protocol is wrong".
+  in a spare scene — it counts inbound messages in the header, which separates "nothing is
+  arriving" from "the protocol is wrong".
 - **First 16 parameters only.** No banking. Devices with more parameters are truncated;
   page changes could select banks, since `onPageChange` already fires a resync.
 - **Names, not values.** An encoder has one 4-character label, so the name is on the screen

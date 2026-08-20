@@ -81,6 +81,24 @@ There is no release event.
 Called when the E16 receives a SysEx message. `bytes` is a table of raw integer byte
 values **including** the `0xF0` and `0xF7` framing bytes.
 
+:::tip[Confirmed on hardware, 2026-08-20]
+**SysEx sent from a computer over USB does reach the script.** Neither document says which
+input `onSysex` listens on, and nothing else in the API can carry data inbound — this is
+the only callback that receives MIDI at all, which is why incoming clock is invisible to a
+script ([Patterns](/oxi-e16-lua-api/patterns/)).
+
+Measured with [`sysex_in_probe.lua`](../sysex_in_probe.lua), sending
+`F0 7D 01 48 69 F7` from a host SysEx utility:
+
+- The message arrives, and successive messages accumulate — the script's counter went 1, 2.
+- `bytes` **does** include the framing, as documented: a four-data-byte message reports
+  `#bytes == 6`, so `bytes[2]` is the manufacturer ID and `bytes[3]` the first payload byte.
+- `0x7D` survives the trip unaltered, so dispatching on the ID byte works.
+
+Still unmeasured: whether the other transports in the `output` list — TRS, BLE — deliver
+inbound SysEx too. Only USB has been tried.
+:::
+
 ```lua
 function controller.onSysex(bytes)
   if bytes[2] ~= 0x7D then return end  -- check manufacturer ID

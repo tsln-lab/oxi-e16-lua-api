@@ -22,9 +22,22 @@
 -- Turning encoder 1 sends `F0 7D 7F <value> F7` back out, which checks the other
 -- direction: watch for it in your DAW's MIDI monitor.
 --
--- WHAT TO REPORT
---   1. Does the count move at all when a computer sends SysEx to the E16?
---   2. If it does, is that true of both Port A and Port B, or only one of them?
+-- RESULT, 2026-08-20: inbound SysEx over USB works.
+--
+-- Sending `F0 7D 01 48 69 F7` from a host utility showed "1 7D 01 6" and then "2 7D 01 6"
+-- on a second send: the message arrives, the count accumulates, `#b` of 6 confirms the
+-- framing bytes are included, and 0x7D reaches the script unaltered. Recorded on
+-- docs/src/content/docs/callbacks.md.
+--
+-- With SendMIDI, note that it reads numbers as DECIMAL unless told otherwise -- `hex` has
+-- to come before `syx`, or "7D" is parsed as 7 and the ID byte arrives wrong:
+--
+--     sendmidi dev "OXI E16" hex syx 7D 01 48 69
+--
+-- STILL OPEN
+--   1. Do the other transports deliver inbound SysEx too, or only USB? (TRS, BLE)
+--   2. Does a DAW control surface's output reach the script the same way a standalone
+--      utility does?
 --   3. Does the outbound ping show up in the DAW, and on which port?
 
 --@assign id=1 abbr="PING" name="Send Ping" desc="Turn to emit a SysEx ping" l=0 h=127 dis=0
