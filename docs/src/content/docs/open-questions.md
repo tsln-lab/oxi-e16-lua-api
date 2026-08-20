@@ -64,6 +64,34 @@ them.
 10. **`accel` beyond 6.** Whether the large-step modes (`LSp2`/`LSp4`/`LSp6`) are reachable
    with higher `accel` values, or not at all from Lua.
 
+## Raised by the Live integration
+
+11. **Does SysEx sent over USB reach `controller.onSysex`?** The callback is documented as
+   firing "when the E16 receives a SysEx message", and 1.2.0 does not say which input it
+   listens on either. Everything that drives the E16 from a computer depends on it —
+   [Ableton Live](/oxi-e16-lua-api/ableton-live/) among them — and no other callback can
+   carry data inbound: `onSysex` is the only one that receives MIDI at all, which is why
+   incoming clock is invisible to a script ([Patterns](/oxi-e16-lua-api/patterns/)).
+   **Probe: [`tests/sysex_in_probe.lua`](../sysex_in_probe.lua)**, which counts inbound
+   messages in the header, so it separates "nothing arrives" from "the payload is wrong".
+   Sub-question if it works: does it hold for every transport in the `output` list
+   (question 7), or only some?
+12. **How does a detent's step size relate to a destination's `l`/`h` range?** Two
+   hypotheses, with opposite consequences for high-resolution control:
+   - *The step scales to the range* — one detent is one output step, so `h=16383` needs
+     16383 detents for a full sweep and is unusable.
+   - *The step is a fixed internal amount* set by `accel` — so a full sweep is roughly the
+     same number of detents whatever `h` is, and raising `h` past the detent count buys no
+     extra distinct values, only a finer scale to express them on.
+
+   The `accel` table describes its modes as dividing *resolution* (`Div8` = "resolution
+   divided by 8"), which leans toward the second — meaning script-side 14-bit output is not
+   reachable by raising `h` alone. Either way `l=0 h=127` behaves as documented; the
+   question is only whether anything finer is available.
+   Test: two otherwise identical controls, `h=127` and `h=16383`, and count the detents
+   each needs to travel end to end. `onEncoderTurn` firing only when the mapped value
+   changes ([Callbacks](/oxi-e16-lua-api/callbacks/)) makes the count easy to read off.
+
 ## Closed by 1.2.0
 
 - **Script size limit** — 8000 bytes. The old manual's 4000 vs 8000/8192 contradiction is

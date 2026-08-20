@@ -47,6 +47,7 @@ export default defineConfig({
 						{ label: 'Patterns', slug: 'patterns' },
 						{ label: 'Device context', slug: 'device-context' },
 						{ label: 'Example: TX81Z editor', slug: 'example-tx81z' },
+						{ label: 'Ableton Live', slug: 'ableton-live' },
 						{ label: 'Open questions', slug: 'open-questions' },
 					],
 				},
