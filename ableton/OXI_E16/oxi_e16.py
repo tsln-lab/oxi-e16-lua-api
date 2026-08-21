@@ -45,12 +45,24 @@ CMD_HELLO = 0x11   # send me the current device
 # of sixteen encoders, so the slots start after it. Set to 0 to include it again.
 SKIP_PARAMS = 1
 
-SLOTS = 16         # encoders on an E16
+# The E16's sixteen encoders are a 4x4 grid numbered left to right, top row first, so a
+# column is {1, 5, 9, 13} and so on. Mixer mode uses each column as one channel strip.
+STRIPS = 4         # channel strips across the grid = tracks visible per bank
+ROWS = 4           # volume, pan, send A, send B -- top to bottom
+SENDS = ROWS - 2
+
+SLOTS = STRIPS * ROWS  # encoders on an E16
+
+# E16 page 1 shows the selected device; pages 2 and up are mixer banks of STRIPS tracks.
+# Pages are the device's own mode mechanism, and onPageChange already fires a resync.
+DEVICE_PAGE = 1
+FIRST_MIXER_PAGE = 2
 MAX_14 = 16383     # the E16's internal value range is 14-bit
 TITLE_CHARS = 15   # page.setTitle limit
 LABEL_CHARS = 4    # encoder label limit
 BLANK_LABEL = "-"  # shown on a slot the device has no parameter for
 NO_DEVICE_TITLE = "No Device"
+NO_TRACKS_TITLE = "No Tracks"
 
 # Names whose automatic abbreviation is poor. Values must be <= 4 characters.
 NAME_OVERRIDES = {
@@ -98,20 +110,39 @@ def abbreviate(name):
     return (initials + words[-1][1:])[:LABEL_CHARS]
 
 
+def send_label(name, index):
+    """Label a send from its return track, dropping Live's leading letter designator.
+
+    Live names return tracks "A Reverb", "B Delay". That first letter is the send letter,
+    already implied by which row the encoder is in, and it would eat two of the four
+    characters available.
+    """
+    words = [w for w in re.split(r"[^A-Za-z0-9]+", _ascii(name, 64)) if w]
+    if len(words) > 1 and len(words[0]) == 1 and words[0].isalpha():
+        return abbreviate(" ".join(words[1:]))
+    if words:
+        return abbreviate(name)
+    return "Snd" + chr(ord("A") + index)
+
+
 class OxiE16(ControlSurface):
 
     def __init__(self, c_instance, *a, **k):
         ControlSurface.__init__(self, c_instance, *a, **k)
         self._c = c_instance
-        self._track = None
-        self._device = None
-        self._params = []
-        self._param_listeners = []
+        self._page = DEVICE_PAGE
+        # One entry per encoder: (parameter, label), or None where the page has nothing.
+        # Mixer controls are DeviceParameters too, so everything downstream -- reading,
+        # writing, listening, echo suppression -- is identical for both modes.
+        self._slots = [None] * SLOTS
+        self._title = NO_DEVICE_TITLE
+        self._bound = []       # listeners belonging to the current page
+        self._song_bound = []  # listeners that outlive a page change
         self._sent = [None] * SLOTS  # last 14-bit value pushed, per slot
         self._dirty = set()
         self._pending_full = False
-        self._song_listener_added = False
         self._connect_song()
+        self._rebind()
         # Live is still wiring up ports during __init__; give it a few ticks before the
         # first push so the opening burst is not sent into a port that is not open yet.
         self.schedule_message(5, self._request_full)
@@ -127,14 +158,8 @@ class OxiE16(ControlSurface):
         return self._c.song()
 
     def disconnect(self):
-        self._unbind_device()
-        self._disconnect_track()
-        if self._song_listener_added:
-            try:
-                self._song().view.remove_selected_track_listener(self._on_track_changed)
-            except (RuntimeError, AttributeError):
-                pass
-            self._song_listener_added = False
+        self._release(self._bound)
+        self._release(self._song_bound)
         # Tell the E16 the link is down, so it shows "No Live" rather than a stale
         # device's parameters that no longer control anything.
         self._send(CMD_CLEAR, [])
@@ -219,87 +244,56 @@ class OxiE16(ControlSurface):
         for midi_bytes in midi_chunk:
             self.receive_midi(midi_bytes)
 
-    # -- selection tracking -----------------------------------------------------
+    # -- listeners --------------------------------------------------------------
+
+    def _listen(self, subject, event, callback, permanent=False):
+        """Attach a listener and remember how to detach it.
+
+        Live raises if the underlying object has gone away, and every subject here can:
+        tracks are deleted, devices replaced, return tracks removed. Failing to attach is
+        not fatal -- that slot simply will not update -- so it is logged, not raised.
+        """
+        try:
+            getattr(subject, "add_%s_listener" % event)(callback)
+        except (RuntimeError, AttributeError) as err:
+            self._debug("cannot listen for %s: %s" % (event, err))
+            return
+        (self._song_bound if permanent else self._bound).append(
+            (subject, event, callback))
+
+    def _release(self, store):
+        for subject, event, callback in store:
+            try:
+                getattr(subject, "remove_%s_listener" % event)(callback)
+            except (RuntimeError, AttributeError):
+                pass
+        del store[:]
 
     def _connect_song(self):
+        song = self._song()
         try:
-            self._song().view.add_selected_track_listener(self._on_track_changed)
-            self._song_listener_added = True
+            view = song.view
         except (RuntimeError, AttributeError) as err:
-            self._log("cannot follow track selection: %s" % (err,))
-        self._on_track_changed()
-
-    def _disconnect_track(self):
-        if self._track is not None:
-            try:
-                self._track.view.remove_selected_device_listener(self._on_device_changed)
-            except (RuntimeError, AttributeError):
-                pass
-        self._track = None
-
-    def _on_track_changed(self):
-        self._disconnect_track()
-        try:
-            track = self._song().view.selected_track
-        except (RuntimeError, AttributeError):
-            track = None
-        self._track = track
-        if track is not None:
-            try:
-                track.view.add_selected_device_listener(self._on_device_changed)
-            except (RuntimeError, AttributeError):
-                pass
-        self._on_device_changed()
-
-    def _on_device_changed(self):
-        device = None
-        if self._track is not None:
-            try:
-                device = self._track.view.selected_device
-            except (RuntimeError, AttributeError):
-                device = None
-        self._bind_device(device)
-        self._request_full()
-
-    def _on_name_changed(self):
-        self._request_full()
-
-    def _unbind_device(self):
-        for param, listener in self._param_listeners:
-            try:
-                param.remove_value_listener(listener)
-            except (RuntimeError, AttributeError):
-                pass
-        self._param_listeners = []
-        if self._device is not None:
-            try:
-                self._device.remove_name_listener(self._on_name_changed)
-            except (RuntimeError, AttributeError):
-                pass
-        self._device = None
-        self._params = []
-
-    def _bind_device(self, device):
-        self._unbind_device()
-        self._device = device
-        if device is None:
+            self._log("cannot reach the song view: %s" % (err,))
             return
-        try:
-            device.add_name_listener(self._on_name_changed)
-        except (RuntimeError, AttributeError):
-            pass
-        try:
-            params = list(device.parameters)[SKIP_PARAMS:]
-            self._params = params[:SLOTS]
-        except (RuntimeError, AttributeError):
-            self._params = []
-        for slot, param in enumerate(self._params):
-            listener = self._make_listener(slot)
-            try:
-                param.add_value_listener(listener)
-                self._param_listeners.append((param, listener))
-            except (RuntimeError, AttributeError):
-                pass
+        # Selection only matters on the device page, but the listeners are cheap and
+        # keeping them attached means switching back to it is already up to date.
+        self._listen(view, "selected_track", self._on_selection_changed, permanent=True)
+        # Adding or removing a track shifts every strip after it, so the mixer has to
+        # rebind rather than just refresh values.
+        self._listen(song, "tracks", self._on_tracks_changed, permanent=True)
+
+    def _on_selection_changed(self):
+        if self._page == DEVICE_PAGE:
+            self._rebind()
+
+    def _on_tracks_changed(self):
+        if self._page != DEVICE_PAGE:
+            self._rebind()
+
+    def _on_names_changed(self):
+        # Labels travel with a full refresh, so there is nothing finer to send.
+        self._request_full()
 
     def _make_listener(self, slot):
         def _mark_dirty():
@@ -307,20 +301,130 @@ class OxiE16(ControlSurface):
 
         return _mark_dirty
 
+    # -- what each page shows ---------------------------------------------------
+
+    def _set_page(self, page):
+        if page < DEVICE_PAGE:
+            page = DEVICE_PAGE
+        if page != self._page:
+            self._page = page
+            self._rebind()
+
+    def _rebind(self):
+        """Rebuild the slot table for the current page and listen to what is in it."""
+        self._release(self._bound)
+        if self._page == DEVICE_PAGE:
+            slots, title = self._device_slots()
+        else:
+            slots, title = self._mixer_slots(self._page - FIRST_MIXER_PAGE)
+        self._slots = slots
+        self._title = title
+        for slot, entry in enumerate(slots):
+            if entry is not None:
+                self._listen(entry[0], "value", self._make_listener(slot))
+        self._request_full()
+
+    def _device_slots(self):
+        slots = [None] * SLOTS
+        try:
+            track = self._song().view.selected_track
+        except (RuntimeError, AttributeError):
+            track = None
+        if track is None:
+            return slots, NO_DEVICE_TITLE
+        self._listen(track.view, "selected_device", self._on_selection_changed)
+        try:
+            device = track.view.selected_device
+        except (RuntimeError, AttributeError):
+            device = None
+        if device is None:
+            return slots, NO_DEVICE_TITLE
+        self._listen(device, "name", self._on_names_changed)
+        try:
+            params = list(device.parameters)[SKIP_PARAMS:][:SLOTS]
+        except (RuntimeError, AttributeError):
+            params = []
+        for slot, param in enumerate(params):
+            slots[slot] = (param, abbreviate(param.name))
+        try:
+            title = _ascii(device.name, TITLE_CHARS) or NO_DEVICE_TITLE
+        except (RuntimeError, AttributeError):
+            title = NO_DEVICE_TITLE
+        return slots, title
+
+    def _mixer_slots(self, bank):
+        """One channel strip per column: volume, pan, send A, send B, top to bottom."""
+        slots = [None] * SLOTS
+        try:
+            tracks = list(self._song().tracks)
+        except (RuntimeError, AttributeError):
+            tracks = []
+        first = max(0, bank) * STRIPS
+        visible = tracks[first:first + STRIPS]
+        if not visible:
+            return slots, NO_TRACKS_TITLE
+
+        labels = self._send_labels()
+        for column, track in enumerate(visible):
+            try:
+                mixer = track.mixer_device
+                sends = list(mixer.sends)
+            except (RuntimeError, AttributeError):
+                continue
+            self._listen(track, "name", self._on_names_changed)
+            slots[column] = (mixer.volume, abbreviate(track.name))
+            slots[STRIPS + column] = (mixer.panning, "Pan")
+            for send in range(SENDS):
+                if send < len(sends):
+                    slots[(2 + send) * STRIPS + column] = (sends[send], labels[send])
+
+        return slots, "Mix %d-%d" % (first + 1, first + len(visible))
+
+    def _send_labels(self):
+        try:
+            returns = list(self._song().return_tracks)
+        except (RuntimeError, AttributeError):
+            returns = []
+        labels = []
+        for send in range(SENDS):
+            if send < len(returns):
+                self._listen(returns[send], "name", self._on_names_changed)
+                labels.append(send_label(returns[send].name, send))
+            else:
+                labels.append("Snd" + chr(ord("A") + send))
+        return labels
+
     def _param_at(self, slot):
-        if 0 <= slot < len(self._params):
-            return self._params[slot]
+        if 0 <= slot < SLOTS:
+            entry = self._slots[slot]
+            if entry is not None:
+                return entry[0]
         return None
+
+    def _label_at(self, slot):
+        if 0 <= slot < SLOTS:
+            entry = self._slots[slot]
+            if entry is not None:
+                return entry[1] or BLANK_LABEL
+        return BLANK_LABEL
 
     # -- protocol ---------------------------------------------------------------
 
     def _handle_sysex(self, midi_bytes):
         command = midi_bytes[2]
-        if command == CMD_HELLO:
+        if command == CMD_HELLO and len(midi_bytes) >= 5:
+            self._set_page(midi_bytes[3])
             self._request_full()
-        elif command == CMD_SET and len(midi_bytes) >= 7:
-            slot = midi_bytes[3]
-            self._apply(slot, (midi_bytes[4] << 7) | midi_bytes[5])
+        elif command == CMD_SET and len(midi_bytes) >= 8:
+            page, slot = midi_bytes[3], midi_bytes[4]
+            if page != self._page:
+                # The E16 changed page and this turn beat the hello. Catch up and drop
+                # it: the slot means something different on each page, so applying it
+                # would move whatever the previous page had bound there.
+                self._debug("turn from page %d, expected %d" % (page, self._page))
+                self._set_page(page)
+                return
+            self._apply(slot, (midi_bytes[5] << 7) | midi_bytes[6])
         else:
             self._debug("unhandled command %02X, %d bytes" % (command, len(midi_bytes)))
 
@@ -334,24 +438,13 @@ class OxiE16(ControlSurface):
         self._pending_full = True
 
     def _send_full_state(self):
-        name = NO_DEVICE_TITLE
-        if self._device is not None:
-            try:
-                name = _ascii(self._device.name, TITLE_CHARS) or NO_DEVICE_TITLE
-            except (RuntimeError, AttributeError):
-                name = NO_DEVICE_TITLE
-        self._send(CMD_DEVICE, [ord(c) for c in name])
+        self._send(CMD_DEVICE, [ord(c) for c in _ascii(self._title, TITLE_CHARS)])
 
         self._dirty = set()
         for slot in range(SLOTS):
             param = self._param_at(slot)
             value = self._encode(param)
-            label = BLANK_LABEL
-            if param is not None:
-                try:
-                    label = abbreviate(param.name) or BLANK_LABEL
-                except (RuntimeError, AttributeError):
-                    label = BLANK_LABEL
+            label = _ascii(self._label_at(slot), LABEL_CHARS) or BLANK_LABEL
             self._sent[slot] = value if param is not None else None
             self._send(
                 CMD_PARAM,
@@ -384,8 +477,7 @@ class OxiE16(ControlSurface):
     def _apply(self, slot, value14):
         param = self._param_at(slot)
         if param is None:
-            self._debug("slot %d holds no parameter (device has %d)"
-                        % (slot, len(self._params)))
+            self._debug("nothing bound to slot %d on page %d" % (slot, self._page))
             return
         try:
             if not getattr(param, "is_enabled", True):

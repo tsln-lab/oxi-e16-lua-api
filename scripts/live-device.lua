@@ -19,12 +19,26 @@
 --@assign id=16 abbr="P16" name="Param 16" l=0 h=127 dis=0
 
 -- ===== live-device.lua =====
--- Ableton Live — selected-device parameter control for the OXI E16.
+-- Ableton Live — device and mixer control for the OXI E16.
 --
--- Pairs with the Live Remote Script in `ableton/OXI_E16/`. Live watches the selected
--- device, abbreviates its parameter names to the 4 characters the E16 screen allows, and
--- pushes name + value to the sixteen encoders over SysEx. Turning an encoder sets the
--- parameter back in Live.
+-- Pairs with the Live Remote Script in `ableton/OXI_E16/`. Live abbreviates names to the
+-- 4 characters the E16 screen allows and pushes name + value to the sixteen encoders over
+-- SysEx; turning an encoder sends the value back.
+--
+-- What the sixteen encoders mean depends on the E16 PAGE, which is the device's own mode
+-- mechanism, so no toggle had to be invented:
+--
+--   page 1  the selected device's parameters, in order
+--   page 2+ the mixer, four tracks per page as vertical strips -- volume, pan, send A,
+--          send B down each column. Page 3 is the next four tracks, and so on.
+--
+-- Every message the E16 sends carries its page, so Live always knows what a slot means
+-- and a page change cannot be misread as a value change.
+--
+-- Drop the same sixteen assignments onto every page you want to use. Sharing script IDs
+-- across pages is deliberate: `controller.set` writes to every destination holding an ID,
+-- so one repaint covers all of them, and only the page you are looking at is visible
+-- anyway. Each page change triggers a fresh repaint for that page.
 --
 -- Why SysEx in both directions: `controller.onSysex` is the ONLY inbound callback the
 -- firmware offers. Incoming CC and notes never reach a script, so parameter names and
@@ -90,16 +104,16 @@ local function blank_all()
     end
 end
 
-local function hello()
-    midi.sendSysex(OUT, { 0xF0, SYX, CMD_HELLO, 0xF7 })
+local function hello(page)
+    midi.sendSysex(OUT, { 0xF0, SYX, CMD_HELLO, page or 1, 0xF7 })
 end
 
 function page.onInit()
     page.setTitle("Live")
     blank_all()
     -- The E16 may well come up after Live has already sent its state, so ask rather than
-    -- wait. The Remote Script answers a hello with a full refresh.
-    hello()
+    -- wait. The Remote Script answers a hello with a full refresh for that page.
+    hello(controller.getPage())
 end
 
 function controller.onEncoderTurn(enc)
@@ -115,8 +129,12 @@ function controller.onEncoderTurn(enc)
     local id = enc.id
     if not id or id < 1 or id > SLOTS then return end
 
+    -- The page travels with the value. Slot 3 is a device parameter on page 1 and a
+    -- track's pan on page 2, so a turn that arrived before Live processed the page change
+    -- would otherwise be applied to the wrong thing entirely.
     local v = enc.scaled * STEP
-    midi.sendSysex(OUT, { 0xF0, SYX, CMD_SET, id - 1, v // 128, v % 128, 0xF7 })
+    midi.sendSysex(OUT,
+        { 0xF0, SYX, CMD_SET, enc.page or 1, id - 1, v // 128, v % 128, 0xF7 })
 end
 
 function controller.onSysex(b)
@@ -151,9 +169,10 @@ function controller.onSysex(b)
     -- CMD_SET. The echo suppression that matters is all on the Live side.
 end
 
-function page.onPageChange()
+function page.onPageChange(previous, current)
     -- Nothing to tear down — no slots or leds overlays are ever installed, and those are
     -- what leak across pages, being keyed by physical position rather than by page.
-    -- Flipping away and back is just a free way to force a resync if the two sides drift.
-    hello()
+    -- Telling Live the new page is the whole mode switch: it rebinds and sends a full
+    -- refresh, which repaints all sixteen labels and values for whatever this page shows.
+    hello(current)
 end

@@ -10,9 +10,43 @@ Two halves of one integration:
 | Device script | [`src/live-device.lua`](https://github.com/tsln-lab/oxi-e16-lua-api/blob/main/src/live-device.lua) → `scripts/live-device.lua` | the E16 |
 | Remote Script | [`ableton/OXI_E16/`](https://github.com/tsln-lab/oxi-e16-lua-api/tree/main/ableton/OXI_E16) | Live (Python) |
 
-Live follows whichever device is selected, abbreviates each parameter name to four
-characters, and pushes name + value to the sixteen encoders. The name lands on the screen,
-the value lands on the LED ring, and turning an encoder sets the parameter back in Live.
+Live abbreviates names to four characters and pushes name + value to the sixteen encoders.
+The name lands on the screen, the value lands on the LED ring, and turning an encoder sends
+the value back.
+
+## Two modes, on E16 pages
+
+Pages are the device's own mode mechanism, so no toggle had to be invented — and
+`onPageChange` already fired a resync:
+
+| Page | Shows |
+|---|---|
+| 1 | The selected device's parameters, in order |
+| 2 | The mixer: tracks 1–4 |
+| 3 | The mixer: tracks 5–8, and so on up to page 12 |
+
+**Drop the same sixteen assignments onto every page you want to use.** Sharing script IDs
+across pages is deliberate: `controller.set` writes to *every* destination holding an ID
+([controller](/oxi-e16-lua-api/api/controller/)), so one repaint covers all of them, and
+only the page you are looking at is visible anyway. Each page change repaints for that page.
+
+### The mixer layout
+
+The E16's encoders are a 4×4 grid numbered left to right, top row first, so a column is
+`{1, 5, 9, 13}`. Each column is one track:
+
+| Row | Encoders | Control |
+|---|---|---|
+| 1 | 1–4 | Volume — labelled with the track name |
+| 2 | 5–8 | Pan |
+| 3 | 9–12 | Send A — labelled from the return track |
+| 4 | 13–16 | Send B |
+
+Send labels drop Live's leading letter designator, since "A Reverb" would spend half of
+four characters on a letter the row already tells you. Columns with no track are blank.
+
+Mixer controls are `DeviceParameter`s exactly like device parameters, so reading, writing,
+listening and echo suppression are shared — only the binding and labelling differ.
 
 ## Why SysEx, in both directions
 
@@ -135,12 +169,17 @@ non-commercial use. Values are 14-bit, split MSB-first into two 7-bit bytes
 
 | Cmd | Payload | Meaning |
 |---|---|---|
-| `0x10` | slot, hi, lo | Encoder turned |
-| `0x11` | — | Send me the current device |
+| `0x10` | page, slot, hi, lo | Encoder turned |
+| `0x11` | page | Send me this page's state |
 
 `slot` is 0-based (script ID − 1). The E16 sends `0x11` from `onInit` and on every page
 change, because it may well boot after Live has already sent its state — asking beats
 waiting, and flipping pages doubles as a manual resync.
+
+**Both E16 messages carry the page**, which is what makes the mode switch safe rather than
+merely convenient. Slot 3 is a device parameter on page 1 and a track's pan on page 2, so a
+turn that overtakes a page change would otherwise be applied to the wrong thing entirely.
+Live drops a turn whose page does not match what it has bound, and catches up.
 
 Neither side acts on its own outbound commands, so a MIDI loopback cannot make the script
 talk to itself. Nor can an inbound value: 1.2.0 states that `controller.set` is a direct
@@ -196,7 +235,8 @@ when the mapped output value changes** ([Callbacks](/oxi-e16-lua-api/callbacks/)
   `parameters[0]` on every device, and it is not worth an encoder — `SKIP_PARAMS` at the
   top of `oxi_e16.py` drops it, and setting it to `0` puts it back. Beyond that there is no
   banking, so devices with more parameters are truncated; page changes could select banks,
-  since `onPageChange` already fires a resync.
+  since `onPageChange` already fires a resync. The mixer banks four tracks per page, so
+  that limit only bites on devices.
 - **Names, not values.** An encoder has one 4-character label, so the name is on the screen
   and the value is on the ring. Since 1.2.0 it could do both:
   [`slots`](/oxi-e16-lua-api/api/slots/) documents a `system.update()` countdown that shows
@@ -207,4 +247,9 @@ when the mapped output value changes** ([Callbacks](/oxi-e16-lua-api/callbacks/)
 - **Selected device, not the blue hand.** Live's "appointed device" is a separate
   mechanism; this follows the device you click.
 - **No press actions.** `p=true` assignments plus `onEncoderPress` would give
-  reset-to-default, using Live's `parameter.default_value`.
+  reset-to-default via Live's `parameter.default_value`, and mute or solo in mixer mode —
+  `track.mute` and `track.solo` are plain booleans. Note that a per-encoder *Special*
+  function consumes the push ([device context](/oxi-e16-lua-api/device-context/)).
+- **Pan rings are unipolar.** `dis=4` would draw a bipolar ring, but `dis` is fixed at
+  assignment time and those encoders are ordinary parameters on the device page. `dis` is
+  not in the runtime property table, so it cannot be switched per page.
