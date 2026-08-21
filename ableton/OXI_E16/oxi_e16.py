@@ -200,15 +200,20 @@ class OxiE16(ControlSurface):
         # so there is nothing for the base class to dispatch a CC or note to.
 
     def receive_midi_chunk(self, midi_chunk):
-        # Live delivers batched MIDI here in some versions; the base class fans it out to
-        # receive_midi. Logged so a silent path shows up as silence in one place only.
+        """Dispatch inbound MIDI ourselves. Deferring to the base class loses it.
+
+        Live delivers batched MIDI here, and `ableton.v2`'s implementation routes SysEx
+        only to registered control elements — anything else is dropped with a
+        "Got unknown sysex message" warning in Log.txt. It does **not** fall through to
+        `receive_midi`. This script registers no elements, by design, so calling the base
+        class discards every message this integration depends on.
+
+        Nothing is lost by not calling it: with no elements there is nothing for it to
+        dispatch to. Queued outbound MIDI is flushed by `update_display` on Live's tick.
+        """
         self._debug("rx chunk of %d" % len(midi_chunk))
-        inherited = getattr(ControlSurface, "receive_midi_chunk", None)
-        if inherited is not None:
-            inherited(self, midi_chunk)
-        else:
-            for midi_bytes in midi_chunk:
-                self.receive_midi(midi_bytes)
+        for midi_bytes in midi_chunk:
+            self.receive_midi(midi_bytes)
 
     # -- selection tracking -----------------------------------------------------
 

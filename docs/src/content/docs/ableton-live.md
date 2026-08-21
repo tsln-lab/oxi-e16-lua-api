@@ -22,10 +22,31 @@ same gap that makes MIDI clock invisible and leaves script LFOs free-running
 ([Patterns](/oxi-e16-lua-api/patterns/)) — so parameter names and values can only arrive as
 SysEx. That part is forced, not chosen.
 
-Using SysEx for the return path too is the choice, and it pays off on the Live side: Live
-hands a control surface every SysEx message it receives, unconditionally, whereas each CC
-has to be registered with `forward_midi_cc` inside `build_midi_map` before `receive_midi`
-ever sees it. One framing, no MIDI map, nothing to rebuild when the mapping changes.
+Using SysEx for the return path too is the choice, and it pays off on the Live side: no
+MIDI map. Each CC would have to be registered with `forward_midi_cc` inside
+`build_midi_map` before `receive_midi` ever saw it, and rebuilt whenever the mapping
+changed. SysEx needs none of that. One framing, both directions.
+
+:::caution[`ableton.v2` drops unregistered SysEx — override `receive_midi_chunk`]
+Live delivers batched inbound MIDI to `receive_midi_chunk`, and **`ableton.v2`'s
+implementation routes SysEx only to registered control elements**. Anything else is
+discarded with a `Got unknown sysex message` warning in Log.txt. It does *not* fall
+through to `receive_midi`.
+
+A script like this one, which registers no control elements on purpose, therefore receives
+nothing at all if it defers to the base class — the messages arrive, Live logs them, and
+the handler never runs. Dispatch them yourself:
+
+```python
+def receive_midi_chunk(self, midi_chunk):
+    for midi_bytes in midi_chunk:
+        self.receive_midi(midi_bytes)
+```
+
+Nothing is lost by not calling the base version: with no elements there is nothing for it
+to dispatch to, and queued outbound MIDI is flushed by `update_display` on Live's tick.
+Measured 2026-08-20 against Live 12.
+:::
 
 ## Why `controller.set` does the whole display
 
