@@ -22,6 +22,12 @@ try:
 except ImportError:  # pragma: no cover - Live 9 and earlier
     from _Framework.ControlSurface import ControlSurface
 
+# Flip to True and restart Live to trace the inbound path in Live's Log.txt. Every message
+# the script receives is logged raw, and every parameter write reports what it did. That
+# separates the three ways this direction can fail: nothing reaches Live at all, something
+# reaches it but is not our message, or ours arrives and the write is refused.
+DEBUG = False
+
 SYSEX_ID = 0x7D  # reserved for non-commercial use
 
 # Live -> E16
@@ -152,7 +158,13 @@ class OxiE16(ControlSurface):
         except Exception as err:  # never let the tick die
             self.log_message("OXI E16: update_display failed: %s" % (err,))
 
+    def _debug(self, message):
+        if DEBUG:
+            self.log_message("OXI E16: " + message)
+
     def receive_midi(self, midi_bytes):
+        if DEBUG:
+            self._debug("rx %s" % " ".join("%02X" % b for b in midi_bytes))
         if (
             len(midi_bytes) >= 4
             and midi_bytes[0] == 0xF0
@@ -164,6 +176,12 @@ class OxiE16(ControlSurface):
                 self.log_message("OXI E16: bad sysex %r: %s" % (midi_bytes, err))
         # Anything else is ignored on purpose: this script defines no control elements,
         # so there is nothing for the base class to dispatch a CC or note to.
+
+    def receive_midi_chunk(self, midi_chunk):
+        # Live delivers batched MIDI here in some versions; the base class fans it out to
+        # receive_midi. Logged so a silent path shows up as silence in one place only.
+        self._debug("rx chunk of %d" % len(midi_chunk))
+        ControlSurface.receive_midi_chunk(self, midi_chunk)
 
     # -- selection tracking -----------------------------------------------------
 
@@ -266,6 +284,8 @@ class OxiE16(ControlSurface):
         elif command == CMD_SET and len(midi_bytes) >= 7:
             slot = midi_bytes[3]
             self._apply(slot, (midi_bytes[4] << 7) | midi_bytes[5])
+        else:
+            self._debug("unhandled command %02X, %d bytes" % (command, len(midi_bytes)))
 
     def _send(self, command, payload):
         try:
@@ -327,10 +347,14 @@ class OxiE16(ControlSurface):
     def _apply(self, slot, value14):
         param = self._param_at(slot)
         if param is None:
+            self._debug("slot %d holds no parameter (device has %d)"
+                        % (slot, len(self._params)))
             return
         try:
             if not getattr(param, "is_enabled", True):
-                return  # e.g. a macro-mapped parameter, which Live will not let us set
+                # e.g. a macro-mapped parameter, which Live will not let us set
+                self._debug("%r is not enabled, ignoring" % (param.name,))
+                return
             low, high = param.min, param.max
             if high <= low:
                 return
@@ -338,6 +362,8 @@ class OxiE16(ControlSurface):
             if getattr(param, "is_quantized", False):
                 value = round(value)
             param.value = max(low, min(high, value))
+            self._debug("set %r to %s (from 14-bit %d, range %s..%s)"
+                        % (param.name, param.value, value14, low, high))
         except (RuntimeError, AttributeError, TypeError) as err:
             self.log_message("OXI E16: cannot set slot %d: %s" % (slot, err))
             return
