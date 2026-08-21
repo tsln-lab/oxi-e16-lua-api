@@ -190,6 +190,8 @@ class OxiE16(ControlSurface):
         self._dirty = set()
         self._pending_full = False
         self._rebind_pending = False
+        self._own_midi_dispatch = True
+        self._connect_midi()
         self._connect_song()
         self._rebind()
         # Live is still wiring up ports during __init__; give it a few ticks before the
@@ -207,6 +209,11 @@ class OxiE16(ControlSurface):
         return self._c.song()
 
     def disconnect(self):
+        if not self._own_midi_dispatch:
+            try:
+                self.remove_received_midi_listener(self._on_received_midi)
+            except (RuntimeError, AttributeError):
+                pass
         self._release(self._bound)
         self._release(self._song_bound)
         # Tell the E16 the link is down, so it shows "No Live" rather than a stale
@@ -262,7 +269,41 @@ class OxiE16(ControlSurface):
         if DEBUG:
             self._log(message)
 
-    def receive_midi(self, midi_bytes):
+    def _connect_midi(self):
+        """Subscribe to raw inbound MIDI through the event the base class provides.
+
+        `ableton.v2` routes SysEx only to registered control elements; anything else is
+        dropped with a "Got unknown sysex message" warning, and `receive_midi_chunk` does
+        **not** fall through to `receive_midi`. This script registers no elements by
+        design, so it has to get the bytes some other way.
+
+        `SimpleControlSurface` declares `__events__ = ('received_midi', ...)`, and both
+        `_do_receive_midi` and `_do_receive_midi_chunk` fire it before dispatching. That
+        is the supported hook, and it is better than overriding the entry points:
+
+        - both the single-message and chunked paths reach it, with no duplication;
+        - the base class's `component_guard()` still wraps the handling, so parameter
+          writes are batched and MIDI-map rebuilds suppressed, which an override skips;
+        - registering a listener makes `received_midi_listener_count()` non-zero, which
+          is exactly the condition that suppresses the warning — so Log.txt stays quiet.
+
+        Older frameworks have no such event, hence the fallback.
+        """
+        if callable(getattr(self, "add_received_midi_listener", None)):
+            try:
+                self.add_received_midi_listener(self._on_received_midi)
+                self._own_midi_dispatch = False
+                return
+            except Exception as err:
+                self._log("cannot subscribe to received_midi: %s" % (err,))
+        self._own_midi_dispatch = True
+        self._debug("no received_midi event; dispatching inbound MIDI directly")
+
+    def _on_received_midi(self, *midi_bytes):
+        # The event passes the bytes as separate arguments, not as one sequence.
+        self._handle_midi(midi_bytes)
+
+    def _handle_midi(self, midi_bytes):
         if DEBUG:
             self._debug("rx %s" % " ".join("%02X" % b for b in midi_bytes))
         if (
@@ -277,21 +318,24 @@ class OxiE16(ControlSurface):
         # Anything else is ignored on purpose: this script defines no control elements,
         # so there is nothing for the base class to dispatch a CC or note to.
 
+    def receive_midi(self, midi_bytes):
+        if self._own_midi_dispatch:
+            self._handle_midi(midi_bytes)
+        else:
+            ControlSurface.receive_midi(self, midi_bytes)
+
     def receive_midi_chunk(self, midi_chunk):
-        """Dispatch inbound MIDI ourselves. Deferring to the base class loses it.
-
-        Live delivers batched MIDI here, and `ableton.v2`'s implementation routes SysEx
-        only to registered control elements — anything else is dropped with a
-        "Got unknown sysex message" warning in Log.txt. It does **not** fall through to
-        `receive_midi`. This script registers no elements, by design, so calling the base
-        class discards every message this integration depends on.
-
-        Nothing is lost by not calling it: with no elements there is nothing for it to
-        dispatch to. Queued outbound MIDI is flushed by `update_display` on Live's tick.
-        """
         self._debug("rx chunk of %d" % len(midi_chunk))
-        for midi_bytes in midi_chunk:
-            self.receive_midi(midi_bytes)
+        if self._own_midi_dispatch:
+            for midi_bytes in midi_chunk:
+                self._handle_midi(midi_bytes)
+            return
+        inherited = getattr(ControlSurface, "receive_midi_chunk", None)
+        if inherited is not None:
+            inherited(self, midi_chunk)
+        else:
+            for midi_bytes in midi_chunk:
+                self.receive_midi(midi_bytes)
 
     # -- listeners --------------------------------------------------------------
 

@@ -96,25 +96,36 @@ MIDI map. Each CC would have to be registered with `forward_midi_cc` inside
 `build_midi_map` before `receive_midi` ever saw it, and rebuilt whenever the mapping
 changed. SysEx needs none of that. One framing, both directions.
 
-:::caution[`ableton.v2` drops unregistered SysEx — override `receive_midi_chunk`]
-Live delivers batched inbound MIDI to `receive_midi_chunk`, and **`ableton.v2`'s
-implementation routes SysEx only to registered control elements**. Anything else is
-discarded with a `Got unknown sysex message` warning in Log.txt. It does *not* fall
-through to `receive_midi`.
+:::caution[`ableton.v2` routes SysEx only to registered elements — subscribe to `received_midi`]
+`ableton.v2`'s `ControlSurface` dispatches SysEx to registered control elements and
+discards anything else with a `Got unknown sysex message` warning in Log.txt.
+`receive_midi_chunk` does *not* fall through to `receive_midi`, so a script that registers
+no elements — as this one does deliberately — receives nothing at all: the messages arrive,
+Live logs them, and the handler never runs.
 
-A script like this one, which registers no control elements on purpose, therefore receives
-nothing at all if it defers to the base class — the messages arrive, Live logs them, and
-the handler never runs. Dispatch them yourself:
+The supported hook is the `received_midi` event. `SimpleControlSurface` declares
+`__events__ = ('received_midi', 'disconnect')`, and **both** `_do_receive_midi` and
+`_do_receive_midi_chunk` fire it before dispatching:
 
 ```python
-def receive_midi_chunk(self, midi_chunk):
-    for midi_bytes in midi_chunk:
-        self.receive_midi(midi_bytes)
+self.add_received_midi_listener(self._on_received_midi)
+
+def _on_received_midi(self, *midi_bytes):   # separate arguments, not one sequence
+    ...
 ```
 
-Nothing is lost by not calling the base version: with no elements there is nothing for it
-to dispatch to, and queued outbound MIDI is flushed by `update_display` on Live's tick.
-Measured 2026-08-20 against Live 12.
+Better than overriding the entry points, for three reasons:
+
+- both the single-message and chunked paths reach it, with no duplication;
+- the base class's `component_guard()` still wraps the handling, so parameter writes are
+  batched and MIDI-map rebuilds suppressed — an override skips that;
+- `process_midi_bytes` warns only when `received_midi_listener_count()` is zero, so
+  registering a listener is exactly what silences the log spam.
+
+Verified against the decompiled Live 12 scripts
+([gluon/AbletonLive12_MIDIRemoteScripts](https://github.com/gluon/AbletonLive12_MIDIRemoteScripts),
+`ableton/v2/control_surface/control_surface.py`), after the behaviour was first observed on
+hardware 2026-08-20.
 :::
 
 ## Why `controller.set` does the whole display
