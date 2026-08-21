@@ -256,6 +256,12 @@ extra distinct values and 128 steps is simply what a script-side encoder gives y
 
 Two problems, both handled on the Live side.
 
+**Stepped parameters.** `parameter.is_quantized` does not catch everything: some devices
+have parameters that step without declaring it — Glue Compressor's Ratio, Attack and
+Release among them. Live's own scripts carry a table of the exceptions keyed by
+`device.class_name`, vendored here from `ableton/v3/live/util.py`, and it is consulted
+alongside the declared flag when deciding whether to round.
+
 **Echo.** Setting a parameter fires Live's own value listener, which would push the value
 straight back. The script records what the controller asked for and drops the echo if the
 value is unchanged. When Live *snaps* the value — quantized parameters do — the encoded

@@ -16,6 +16,7 @@ https://tsln-lab.github.io/oxi-e16-lua-api/ableton-live/
 
 import logging
 import re
+from collections import namedtuple
 
 try:
     # Live 10 and later.
@@ -52,6 +53,10 @@ ROWS = 4           # volume, pan, send A, send B -- top to bottom
 SENDS = ROWS - 2
 
 SLOTS = STRIPS * ROWS  # encoders on an E16
+
+# What one encoder is bound to. `quantized` is resolved once at bind time because it needs
+# the owning device, which the slot table does not otherwise keep.
+Slot = namedtuple("Slot", "parameter label color quantized")
 
 # E16 page 1 shows the selected device; pages 2 and up are mixer banks of STRIPS tracks.
 # Pages are the device's own mode mechanism, and onPageChange already fires a resync.
@@ -120,6 +125,40 @@ def abbreviate(name):
     # Pad a short set of initials from the tail of the last word: "Osc 1 Coarse"
     # reads better as "O1Co" than "O1C".
     return (initials + words[-1][1:])[:LABEL_CHARS]
+
+
+# Some devices have parameters that step like quantized ones but do not declare it, so
+# `parameter.is_quantized` alone is wrong for them. Verbatim from the decompiled Live 12
+# scripts, ableton/v3/live/util.py — Live's own control surfaces carry the same table.
+UNDECLARED_QUANTIZED_PARAMETERS = {
+    "AutoFilter": ("LFO Sync Rate",),
+    "AutoPan": ("Sync Rate",),
+    "BeatRepeat": ("Gate", "Grid", "Interval", "Offset", "Variation"),
+    "Corpus": ("LFO Sync Rate",),
+    "Flanger": ("Sync Rate",),
+    "FrequencyShifter": ("Sync Rate",),
+    "GlueCompressor": ("Ratio", "Attack", "Release"),
+    "MidiArpeggiator": ("Offset", "Synced Rate", "Repeats", "Ret. Interval",
+                        "Transp. Steps"),
+    "MidiNoteLength": ("Synced Length",),
+    "MidiScale": ("Base",),
+    "MultiSampler": ("L 1 Sync Rate", "L 2 Sync Rate", "L 3 Sync Rate"),
+    "Operator": ("LFO Sync",),
+    "OriginalSimpler": ("L Sync Rate",),
+    "Phaser": ("LFO Sync Rate",),
+}
+
+
+def is_quantized(parameter, device):
+    """Whether a parameter steps, including the ones Live does not declare."""
+    try:
+        if parameter.is_quantized:
+            return True
+        undeclared = UNDECLARED_QUANTIZED_PARAMETERS.get(
+            getattr(device, "class_name", None), ())
+        return parameter.name in undeclared
+    except (RuntimeError, AttributeError):
+        return False
 
 
 def e16_color(rgb):
@@ -466,7 +505,8 @@ class OxiE16(ControlSurface):
             # Device pages leave the rings to the firmware: there is no track colour that
             # belongs to an individual parameter, and not owning them means nothing to
             # reset on the way out.
-            slots[slot] = (param, abbreviate(param.name), NO_COLOR)
+            slots[slot] = Slot(param, abbreviate(param.name), NO_COLOR,
+                               is_quantized(param, device))
         try:
             title = _ascii(device.name, TITLE_CHARS) or NO_DEVICE_TITLE
         except (RuntimeError, AttributeError):
@@ -508,7 +548,8 @@ class OxiE16(ControlSurface):
             # The whole column carries the track's colour, so a strip reads as one track.
             for row, entry in enumerate(strip[:ROWS]):
                 if entry is not None:
-                    entry = (entry[0], entry[1], color)
+                    param, label = entry
+                    entry = Slot(param, label, color, is_quantized(param, None))
                 slots[row * STRIPS + column] = entry
 
         return slots, "Mix %d-%d" % (first + 1, first + len(visible))
@@ -527,26 +568,22 @@ class OxiE16(ControlSurface):
                 labels.append("Snd" + chr(ord("A") + send))
         return labels
 
-    def _param_at(self, slot):
+    def _slot_at(self, slot):
         if 0 <= slot < SLOTS:
-            entry = self._slots[slot]
-            if entry is not None:
-                return entry[0]
+            return self._slots[slot]
         return None
 
+    def _param_at(self, slot):
+        entry = self._slot_at(slot)
+        return entry.parameter if entry is not None else None
+
     def _label_at(self, slot):
-        if 0 <= slot < SLOTS:
-            entry = self._slots[slot]
-            if entry is not None:
-                return entry[1] or BLANK_LABEL
-        return BLANK_LABEL
+        entry = self._slot_at(slot)
+        return (entry.label or BLANK_LABEL) if entry is not None else BLANK_LABEL
 
     def _color_at(self, slot):
-        if 0 <= slot < SLOTS:
-            entry = self._slots[slot]
-            if entry is not None:
-                return entry[2]
-        return NO_COLOR
+        entry = self._slot_at(slot)
+        return entry.color if entry is not None else NO_COLOR
 
     # -- protocol ---------------------------------------------------------------
 
@@ -616,7 +653,8 @@ class OxiE16(ControlSurface):
         return max(0, min(MAX_14, int(round(fraction * MAX_14))))
 
     def _apply(self, slot, value14):
-        param = self._param_at(slot)
+        entry = self._slot_at(slot)
+        param = entry.parameter if entry is not None else None
         if param is None:
             self._debug("nothing bound to slot %d on page %d" % (slot, self._page))
             return
@@ -629,7 +667,7 @@ class OxiE16(ControlSurface):
             if high <= low:
                 return
             value = low + (high - low) * (max(0, min(MAX_14, value14)) / float(MAX_14))
-            if getattr(param, "is_quantized", False):
+            if entry.quantized:
                 value = round(value)
             param.value = max(low, min(high, value))
             self._debug("set %r to %s (from 14-bit %d, range %s..%s)"
