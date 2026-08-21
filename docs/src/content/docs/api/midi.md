@@ -86,7 +86,15 @@ axis only: they are logical ports sharing one physical output (p.18, "may be ide
 |---|---|---|---|---|---|---|---|---|---|
 | All | TRS1 | TRS2 | USB1 | USB2 | USB3 | BLE | ALL-BLE | ALL-USB | Off |
 
-Do not rely on this. `0` is the only safe value until it is measured —
+:::note[Partial measurement, 2026-08-20]
+Sending SysEx from a script on index **0** and index **3** both produced MIDI input
+activity in Ableton Live over USB, which is consistent with `0` = All and `3` = USB1 and
+with the order above. Two caveats before treating it as settled: a DAW's input indicator is
+global rather than per-port, so this pins the two indices only as far as *reached the host
+over USB*; and the remaining eight entries are untested.
+:::
+
+Do not rely on the rest. `0` is the only value either document specifies —
 `tests/output_port_probe.lua` does it in one button press by sending a different CC number
 on each index, so every receiver identifies itself. See
 [Open questions](/oxi-e16-lua-api/open-questions/).
