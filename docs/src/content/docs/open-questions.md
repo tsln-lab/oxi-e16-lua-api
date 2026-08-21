@@ -50,9 +50,11 @@ them.
    **Probe: `tests/output_port_probe.lua`** — one press sends a different CC number on each
    index, so every connected receiver identifies which index reached it. Needs at least TRS
    and USB connected to something that shows incoming CC.
-   Partial result 2026-08-20: indices `0` and `3` both reach a host over USB, consistent
-   with `0` = All and `3` = USB1 ([midi](/oxi-e16-lua-api/api/midi/#the-output-argument)).
-   The other eight are untested, and TRS and BLE have not been tried at all.
+   Partial result 2026-08-20: **`3` = USB1**, measured with only USB1 enabled in Ableton
+   Live's MIDI preferences so the port was isolated rather than inferred; `0` reaches it
+   too, as its documented "all outputs" implies
+   ([midi](/oxi-e16-lua-api/api/midi/#the-output-argument)). Both match the hypothesised
+   order. The other eight indices are untested, and TRS and BLE have not been tried at all.
 8. **`dis` — resolved 2026-08-09, as far as it is observable.** Setting `dis` suppresses
    the numeric readout; omitting it lets the firmware draw numbers over the label. `dis=4`
    gives a bipolar ring, eight values give a unipolar ring, seven blank it ([Assignments (--@assign)](/oxi-e16-lua-api/assignments/)).

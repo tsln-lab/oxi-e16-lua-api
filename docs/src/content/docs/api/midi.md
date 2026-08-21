@@ -86,12 +86,14 @@ axis only: they are logical ports sharing one physical output (p.18, "may be ide
 |---|---|---|---|---|---|---|---|---|---|
 | All | TRS1 | TRS2 | USB1 | USB2 | USB3 | BLE | ALL-BLE | ALL-USB | Off |
 
-:::note[Partial measurement, 2026-08-20]
-Sending SysEx from a script on index **0** and index **3** both produced MIDI input
-activity in Ableton Live over USB, which is consistent with `0` = All and `3` = USB1 and
-with the order above. Two caveats before treating it as settled: a DAW's input indicator is
-global rather than per-port, so this pins the two indices only as far as *reached the host
-over USB*; and the remaining eight entries are untested.
+:::note[Measured 2026-08-20: `0` = All and `3` = USB1]
+Sending SysEx from a script on index **3** reached Ableton Live with **only USB1 enabled**
+in Live's MIDI preferences, so the port was isolated rather than inferred from a global
+input indicator. Index **0** arrives the same way, consistent with its documented "all
+outputs". Both match the hypothesised order below.
+
+The remaining eight entries are still untested, as are TRS and BLE — the two indices
+measured here happen to be the two the guide already effectively gives you.
 :::
 
 Do not rely on the rest. `0` is the only value either document specifies —
