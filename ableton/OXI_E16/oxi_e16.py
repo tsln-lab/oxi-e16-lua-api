@@ -65,6 +65,10 @@ TRACK_COLORS = True
 # Sent in place of a colour to mean "firmware draws this ring". 0-100 are real colours, so
 # the sentinel has to sit outside that range but stay inside a 7-bit SysEx data byte.
 NO_COLOR = 127
+
+# Below this, a colour is too close to grey for its hue to mean anything. Chosen against
+# Live's own track palette, where 13 of 70 entries fall below it.
+MIN_SATURATION = 0.25
 MAX_14 = 16383     # the E16's internal value range is 14-bit
 TITLE_CHARS = 15   # page.setTitle limit
 LABEL_CHARS = 4    # encoder label limit
@@ -127,6 +131,9 @@ def e16_color(rgb):
     word "rotation" suggests a hue wheel, which is what this assumes: hue in degrees,
     scaled to 0-100.
 
+    Returns NO_COLOR for anything too desaturated to have a hue, leaving that ring to the
+    firmware.
+
     If the probe shows otherwise, this function is the only thing that has to change.
     See open question 1, and `tests/led_color_probe.lua`, which sweeps the full range.
     """
@@ -134,10 +141,12 @@ def e16_color(rgb):
     green = ((rgb >> 8) & 0xFF) / 255.0
     blue = (rgb & 0xFF) / 255.0
     high, low = max(red, green, blue), min(red, green, blue)
-    if high <= 0 or high == low:
-        # Black, white and greys have no hue to rotate to. Live's palette includes
-        # several, so this is a real case rather than a defensive one.
-        return 0
+    if high <= 0 or (high - low) / high < MIN_SATURATION:
+        # No meaningful hue to rotate to, so leave the ring to the firmware rather than
+        # inventing one. This is not a defensive edge case: of the 70 colours in Live's
+        # track palette, 13 fall below this threshold and 5 are pure grey, and every grey
+        # has a hue of exactly 0 — so without this a grey track would show a red ring.
+        return NO_COLOR
     span = high - low
     if high == red:
         hue = ((green - blue) / span) % 6

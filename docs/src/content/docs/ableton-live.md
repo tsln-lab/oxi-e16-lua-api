@@ -75,6 +75,12 @@ describes what the argument does ([open question 1](/oxi-e16-lua-api/open-questi
 which sweeps the whole range across the sixteen rings, and correct that one function —
 nothing else depends on the mapping. `TRACK_COLORS = False` disables the whole feature and
 returns every ring to the firmware.
+
+**Desaturated tracks keep the firmware's ring.** Live's track palette has 70 entries, of
+which 13 are too close to grey for a hue to mean anything and 5 are pure grey — and every
+grey has a hue of exactly 0, so mapping them anyway would paint a grey track *red*. Below
+`MIN_SATURATION` the mapping returns `NO_COLOR` and that ring is left alone. Checked
+against the palette in the decompiled scripts (`Akai_Force_MPC/live_colors.py`).
 :::
 
 Send labels drop Live's leading letter designator, since "A Reverb" would spend half of
