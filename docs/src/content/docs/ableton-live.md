@@ -192,8 +192,11 @@ when the mapped output value changes** ([Callbacks](/oxi-e16-lua-api/callbacks/)
   [`tests/sysex_in_probe.lua`](https://github.com/tsln-lab/oxi-e16-lua-api/blob/main/tests/sysex_in_probe.lua)
   in a spare scene — it counts inbound messages in the header, which separates "nothing is
   arriving" from "the protocol is wrong".
-- **First 16 parameters only.** No banking. Devices with more parameters are truncated;
-  page changes could select banks, since `onPageChange` already fires a resync.
+- **Sixteen parameters, starting after the on/off switch.** Live puts that switch at
+  `parameters[0]` on every device, and it is not worth an encoder — `SKIP_PARAMS` at the
+  top of `oxi_e16.py` drops it, and setting it to `0` puts it back. Beyond that there is no
+  banking, so devices with more parameters are truncated; page changes could select banks,
+  since `onPageChange` already fires a resync.
 - **Names, not values.** An encoder has one 4-character label, so the name is on the screen
   and the value is on the ring. Since 1.2.0 it could do both:
   [`slots`](/oxi-e16-lua-api/api/slots/) documents a `system.update()` countdown that shows

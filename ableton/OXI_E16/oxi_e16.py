@@ -41,6 +41,10 @@ CMD_CLEAR = 0x04   # this script is going away
 CMD_SET = 0x10     # slot, value -- encoder turned on the controller
 CMD_HELLO = 0x11   # send me the current device
 
+# Live puts the device on/off switch at parameters[0] on every device. It is not worth one
+# of sixteen encoders, so the slots start after it. Set to 0 to include it again.
+SKIP_PARAMS = 1
+
 SLOTS = 16         # encoders on an E16
 MAX_14 = 16383     # the E16's internal value range is 14-bit
 TITLE_CHARS = 15   # page.setTitle limit
@@ -285,7 +289,8 @@ class OxiE16(ControlSurface):
         except (RuntimeError, AttributeError):
             pass
         try:
-            self._params = list(device.parameters)[:SLOTS]
+            params = list(device.parameters)[SKIP_PARAMS:]
+            self._params = params[:SLOTS]
         except (RuntimeError, AttributeError):
             self._params = []
         for slot, param in enumerate(self._params):
