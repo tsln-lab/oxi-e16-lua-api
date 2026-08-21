@@ -57,6 +57,14 @@ SLOTS = STRIPS * ROWS  # encoders on an E16
 # Pages are the device's own mode mechanism, and onPageChange already fires a resync.
 DEVICE_PAGE = 1
 FIRST_MIXER_PAGE = 2
+
+# Colour each mixer column with its track's colour. Set False to leave every ring drawn by
+# the firmware, which is the safer default if the mapping below turns out to be wrong.
+TRACK_COLORS = True
+
+# Sent in place of a colour to mean "firmware draws this ring". 0-100 are real colours, so
+# the sentinel has to sit outside that range but stay inside a 7-bit SysEx data byte.
+NO_COLOR = 127
 MAX_14 = 16383     # the E16's internal value range is 14-bit
 TITLE_CHARS = 15   # page.setTitle limit
 LABEL_CHARS = 4    # encoder label limit
@@ -110,6 +118,45 @@ def abbreviate(name):
     return (initials + words[-1][1:])[:LABEL_CHARS]
 
 
+def e16_color(rgb):
+    """Map a Live track colour to the E16's 0-100 ring colour.
+
+    **Unverified.** API 1.2.0 redefines `leds.update`'s `color` as a "0-100 rotation",
+    replacing the 0-15 palette index of 1.0.0 — and the sixteen-entry palette measured on
+    hardware predates that change, so it no longer describes what the argument does. The
+    word "rotation" suggests a hue wheel, which is what this assumes: hue in degrees,
+    scaled to 0-100.
+
+    If the probe shows otherwise, this function is the only thing that has to change.
+    See open question 1, and `tests/led_color_probe.lua`, which sweeps the full range.
+    """
+    red = ((rgb >> 16) & 0xFF) / 255.0
+    green = ((rgb >> 8) & 0xFF) / 255.0
+    blue = (rgb & 0xFF) / 255.0
+    high, low = max(red, green, blue), min(red, green, blue)
+    if high <= 0 or high == low:
+        # Black, white and greys have no hue to rotate to. Live's palette includes
+        # several, so this is a real case rather than a defensive one.
+        return 0
+    span = high - low
+    if high == red:
+        hue = ((green - blue) / span) % 6
+    elif high == green:
+        hue = (blue - red) / span + 2
+    else:
+        hue = (red - green) / span + 4
+    return int(round(hue * 60.0 / 360.0 * 100)) % 100
+
+
+def track_color(track):
+    if not TRACK_COLORS:
+        return NO_COLOR
+    try:
+        return e16_color(int(track.color))
+    except (RuntimeError, AttributeError, TypeError, ValueError):
+        return NO_COLOR
+
+
 def send_label(name, index):
     """Label a send from its return track, dropping Live's leading letter designator.
 
@@ -131,7 +178,8 @@ class OxiE16(ControlSurface):
         ControlSurface.__init__(self, c_instance, *a, **k)
         self._c = c_instance
         self._page = DEVICE_PAGE
-        # One entry per encoder: (parameter, label), or None where the page has nothing.
+        # One entry per encoder: (parameter, label, colour), or None where the page has
+        # nothing.
         # Mixer controls are DeviceParameters too, so everything downstream -- reading,
         # writing, listening, echo suppression -- is identical for both modes.
         self._slots = [None] * SLOTS
@@ -141,6 +189,7 @@ class OxiE16(ControlSurface):
         self._sent = [None] * SLOTS  # last 14-bit value pushed, per slot
         self._dirty = set()
         self._pending_full = False
+        self._rebind_pending = False
         self._connect_song()
         self._rebind()
         # Live is still wiring up ports during __init__; give it a few ticks before the
@@ -283,17 +332,33 @@ class OxiE16(ControlSurface):
         # rebind rather than just refresh values.
         self._listen(song, "tracks", self._on_tracks_changed, permanent=True)
 
+    def _schedule_rebind(self):
+        """Rebuild the slot table on the next tick.
+
+        Deferred rather than immediate because these callbacks are Live listeners, and a
+        rebind detaches listeners — including, sometimes, the one currently running.
+        Collapsing repeats also matters: renaming a track fires per keystroke.
+        """
+        if not self._rebind_pending:
+            self._rebind_pending = True
+            self.schedule_message(1, self._deferred_rebind)
+
+    def _deferred_rebind(self):
+        self._rebind_pending = False
+        self._rebind()
+
     def _on_selection_changed(self):
         if self._page == DEVICE_PAGE:
-            self._rebind()
+            self._schedule_rebind()
 
     def _on_tracks_changed(self):
         if self._page != DEVICE_PAGE:
-            self._rebind()
+            self._schedule_rebind()
 
-    def _on_names_changed(self):
-        # Labels travel with a full refresh, so there is nothing finer to send.
-        self._request_full()
+    def _on_appearance_changed(self):
+        # Labels and colours are read when the slot table is built, so a refresh would
+        # re-send exactly what was sent before. The table itself has to be rebuilt.
+        self._schedule_rebind()
 
     def _make_listener(self, slot):
         def _mark_dirty():
@@ -339,13 +404,16 @@ class OxiE16(ControlSurface):
             device = None
         if device is None:
             return slots, NO_DEVICE_TITLE
-        self._listen(device, "name", self._on_names_changed)
+        self._listen(device, "name", self._on_appearance_changed)
         try:
             params = list(device.parameters)[SKIP_PARAMS:][:SLOTS]
         except (RuntimeError, AttributeError):
             params = []
         for slot, param in enumerate(params):
-            slots[slot] = (param, abbreviate(param.name))
+            # Device pages leave the rings to the firmware: there is no track colour that
+            # belongs to an individual parameter, and not owning them means nothing to
+            # reset on the way out.
+            slots[slot] = (param, abbreviate(param.name), NO_COLOR)
         try:
             title = _ascii(device.name, TITLE_CHARS) or NO_DEVICE_TITLE
         except (RuntimeError, AttributeError):
@@ -371,7 +439,9 @@ class OxiE16(ControlSurface):
                 sends = list(mixer.sends)
             except (RuntimeError, AttributeError):
                 continue
-            self._listen(track, "name", self._on_names_changed)
+            self._listen(track, "name", self._on_appearance_changed)
+            self._listen(track, "color", self._on_appearance_changed)
+            color = track_color(track)
 
             # Top-down: the sends in A-to-B order, then pan, then the fader at the
             # bottom. Reorder these lines to move a control; nothing else depends on it.
@@ -382,7 +452,10 @@ class OxiE16(ControlSurface):
             strip.append((mixer.panning, "Pan"))
             strip.append((mixer.volume, abbreviate(track.name)))
 
+            # The whole column carries the track's colour, so a strip reads as one track.
             for row, entry in enumerate(strip[:ROWS]):
+                if entry is not None:
+                    entry = (entry[0], entry[1], color)
                 slots[row * STRIPS + column] = entry
 
         return slots, "Mix %d-%d" % (first + 1, first + len(visible))
@@ -395,7 +468,7 @@ class OxiE16(ControlSurface):
         labels = []
         for send in range(SENDS):
             if send < len(returns):
-                self._listen(returns[send], "name", self._on_names_changed)
+                self._listen(returns[send], "name", self._on_appearance_changed)
                 labels.append(send_label(returns[send].name, send))
             else:
                 labels.append("Snd" + chr(ord("A") + send))
@@ -414,6 +487,13 @@ class OxiE16(ControlSurface):
             if entry is not None:
                 return entry[1] or BLANK_LABEL
         return BLANK_LABEL
+
+    def _color_at(self, slot):
+        if 0 <= slot < SLOTS:
+            entry = self._slots[slot]
+            if entry is not None:
+                return entry[2]
+        return NO_COLOR
 
     # -- protocol ---------------------------------------------------------------
 
@@ -455,7 +535,8 @@ class OxiE16(ControlSurface):
             self._sent[slot] = value if param is not None else None
             self._send(
                 CMD_PARAM,
-                [slot, value >> 7, value & 0x7F] + [ord(c) for c in label],
+                [slot, value >> 7, value & 0x7F, self._color_at(slot)]
+                + [ord(c) for c in label],
             )
 
     def _send_value(self, slot):

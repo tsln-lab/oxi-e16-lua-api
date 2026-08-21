@@ -45,6 +45,38 @@ bottom:
 
 The order is a plain list in `_mixer_slots`, so moving a control is reordering a line.
 
+### Ring colours
+
+Each column is tinted with its track's colour in Live, so a strip reads as one track. This
+is the one place the script takes a ring over: colour is only reachable through
+`leds.update`, which **owns** the ring until an explicit `leds.reset`
+([leds](/oxi-e16-lua-api/api/leds/)). Three consequences, all handled in
+`src/live-device.lua`:
+
+- The script draws those rings itself on every value change *and* every turn — the
+  firmware has stopped drawing them, so a turn would otherwise move nothing.
+- Every ring is handed back on the way out of a mixer page. Overlays are keyed by physical
+  position and survive a page change, so a colour left behind reappears under whatever
+  occupies that encoder next.
+- `leds.reset` takes a **position** where `leds.update` takes an **ID**, so giving a ring
+  back relies on assignment *N* sitting on encoder *N*. That is the documented setup, but
+  colour is the only feature that depends on it.
+
+Device pages send no colour and leave the rings to the firmware, so nothing is owned there.
+
+:::caution[The colour mapping is a hypothesis, not a measurement]
+API 1.2.0 redefines `color` as a **0–100 rotation**, replacing 1.0.0's 0–15 palette index
+— and the sixteen-entry palette measured on hardware predates that change, so it no longer
+describes what the argument does ([open question 1](/oxi-e16-lua-api/open-questions/)).
+
+`e16_color()` assumes "rotation" means a hue wheel and maps Live's RGB to hue scaled to
+0–100. That is a guess from the wording. Run
+[`tests/led_color_probe.lua`](https://github.com/tsln-lab/oxi-e16-lua-api/blob/main/tests/led_color_probe.lua),
+which sweeps the whole range across the sixteen rings, and correct that one function —
+nothing else depends on the mapping. `TRACK_COLORS = False` disables the whole feature and
+returns every ring to the firmware.
+:::
+
 Send labels drop Live's leading letter designator, since "A Reverb" would spend half of
 four characters on a letter the row already tells you. Columns with no track are blank.
 

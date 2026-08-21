@@ -37,14 +37,18 @@
 --
 -- `slots.update` cannot do the label half: it takes an encoder POSITION, which a script
 -- only learns from `enc.index` on a turn, so it cannot paint a control nobody has touched.
--- `leds.update` could do the ring half since 1.2.0 (it takes a script ID now, not a
--- position), but there is no reason to: writing "v" is needed anyway so the next turn
--- continues from the right place, the firmware draws the ring from it for free, and
--- taking the ring over would mean owning it until an explicit `leds.reset` -- on the
--- current page only, where `controller.set` reaches every page.
+-- Parameter slot N is script ID N, and the labels never need a position.
 --
--- Net effect: no position dependency, no page dependency, and no overlay to tear down in
--- `onPageChange`. Parameter slot N is script ID N.
+-- The rings are the exception. Live sends a colour per slot so a mixer column reads as one
+-- track, and colour is only reachable through `leds.update`, which TAKES OWNERSHIP of the
+-- ring until an explicit `leds.reset`. So for coloured slots this script must draw the
+-- ring itself on every change -- and hand it back on the way out, or the colour leaks onto
+-- whatever occupies that encoder next. Slots Live sends no colour for are left alone and
+-- the firmware keeps drawing them from the value, which is what device pages do.
+--
+-- `leds.reset` takes a POSITION where `leds.update` takes an ID, so giving a ring back
+-- relies on assignment N sitting on encoder N. That is the documented setup, but it is
+-- load-bearing here in a way it is not anywhere else in this script.
 --
 -- Build with: mise exec -- lua build.lua
 
@@ -77,7 +81,7 @@ local STEP = 129
 
 -- Live -> E16
 local CMD_DEVICE = 0x01  -- device name, for the header
-local CMD_PARAM  = 0x02  -- slot, value, name — a full slot refresh
+local CMD_PARAM  = 0x02  -- slot, value, colour, name — a full slot refresh
 local CMD_VALUE  = 0x03  -- slot, value — parameter moved in Live
 local CMD_CLEAR  = 0x04  -- Live disconnected
 
@@ -92,6 +96,28 @@ local function text(b, from)
         s = s .. string.char(b[i])
     end
     return s
+end
+
+-- Ring colour per script ID, for the slots this script has taken over. Absent means the
+-- firmware still owns that ring.
+local colours = {}
+
+local function paint(id, v)
+    local c = colours[id]
+    if c then
+        leds.update(id, v, c)
+    end
+end
+
+-- Give every ring back. Rings are keyed by physical position and survive a page change,
+-- so a colour left behind reappears under whatever lands on that encoder next.
+local function release_rings()
+    for i = 1, SLOTS do
+        if colours[i] then
+            leds.reset(i)
+            colours[i] = nil
+        end
+    end
 end
 
 local function blank_all()
@@ -131,6 +157,10 @@ function controller.onEncoderTurn(enc)
     local v = enc.scaled * STEP
     midi.sendSysex(OUT,
         { 0xF0, SYX, CMD_SET, enc.page or 1, id - 1, v // 128, v % 128, 0xF7 })
+
+    -- On a ring we own the firmware no longer redraws from the value it just stored, so
+    -- the turn would not move the ring at all without this.
+    paint(id, enc.value)
 end
 
 function controller.onSysex(b)
@@ -147,14 +177,23 @@ function controller.onSysex(b)
         if id < 1 or id > SLOTS then return end
         local v = b[5] * 128 + b[6]
         if cmd == CMD_PARAM then
-            controller.set(id, { v = v, n = text(b, 7) })
+            local colour = b[7]
+            if colour <= 100 then
+                colours[id] = colour
+            elseif colours[id] then
+                leds.reset(id)      -- position, by the assignment-order convention
+                colours[id] = nil
+            end
+            controller.set(id, { v = v, n = text(b, 8) })
         else
             controller.set(id, "v", v)
         end
+        paint(id, v)
     elseif cmd == CMD_DEVICE then
         page.setTitle(text(b, 4))
     elseif cmd == CMD_CLEAR then
         page.setTitle("No Live")
+        release_rings()
         blank_all()
     end
     -- CMD_SET and CMD_HELLO are ours, outbound only. Ignoring them means a MIDI loopback
@@ -166,9 +205,9 @@ function controller.onSysex(b)
 end
 
 function page.onPageChange(previous, current)
-    -- Nothing to tear down — no slots or leds overlays are ever installed, and those are
-    -- what leak across pages, being keyed by physical position rather than by page.
-    -- Telling Live the new page is the whole mode switch: it rebinds and sends a full
-    -- refresh, which repaints all sixteen labels and values for whatever this page shows.
+    -- Hand back every ring before asking for the new page. Overlays are keyed by physical
+    -- position, not by page, so a colour kept here would land on whatever this encoder
+    -- becomes. Live's reply re-colours whatever the new page actually wants.
+    release_rings()
     hello(current)
 end
