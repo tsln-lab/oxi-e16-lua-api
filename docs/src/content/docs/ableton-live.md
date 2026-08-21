@@ -162,11 +162,12 @@ when the mapped output value changes** ([Callbacks](/oxi-e16-lua-api/callbacks/)
 
 ## Limits and what is not done yet
 
-- **Partly verified on hardware.** The transport works: SysEx sent from a computer over
-  USB reaches `controller.onSysex`, framing intact and `0x7D` unaltered, measured
-  2026-08-20 ([Callbacks](/oxi-e16-lua-api/callbacks/)). What has *not* been confirmed is
-  that Live's control-surface output arrives by the same path as a standalone utility, or
-  that the round trip behaves end to end. If something misbehaves, run
+- **Live → E16 verified on hardware, 2026-08-20.** SysEx over USB reaches
+  `controller.onSysex` with framing intact and `0x7D` unaltered, and Live's control-surface
+  output arrives by that same path: moving a parameter in Live raised `onSysex` on the
+  device, which also means device selection had bound the parameter listeners
+  ([Callbacks](/oxi-e16-lua-api/callbacks/)). Not yet exercised on hardware: the display
+  itself, and the **E16 → Live** direction. If something misbehaves, run
   [`tests/sysex_in_probe.lua`](https://github.com/tsln-lab/oxi-e16-lua-api/blob/main/tests/sysex_in_probe.lua)
   in a spare scene — it counts inbound messages in the header, which separates "nothing is
   arriving" from "the protocol is wrong".

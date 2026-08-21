@@ -72,9 +72,10 @@ them.
    `0xF7` framing as documented, and `0x7D` passes through unaltered so dispatching on the
    ID byte works. Recorded on [Callbacks](/oxi-e16-lua-api/callbacks/); it is what makes
    [Ableton Live](/oxi-e16-lua-api/ableton-live/) possible at all.
-   Remaining sub-questions: whether the other transports in the `output` list (question 7)
-   also deliver inbound SysEx — only USB has been tried — and whether a control surface's
-   output in a DAW reaches the script by the same path a standalone utility does.
+   A DAW control surface's output arrives by the same path, confirmed separately with
+   Ableton Live: moving a parameter in Live raised `onSysex` on the device.
+   Remaining sub-question: whether the other transports in the `output` list (question 7)
+   also deliver inbound SysEx — only USB has been tried.
 12. **How does a detent's step size relate to a destination's `l`/`h` range?** Two
    hypotheses, with opposite consequences for high-resolution control:
    - *The step scales to the range* — one detent is one output step, so `h=16383` needs

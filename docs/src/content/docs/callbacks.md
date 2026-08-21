@@ -95,6 +95,11 @@ Measured with [`sysex_in_probe.lua`](../sysex_in_probe.lua), sending
   `#bytes == 6`, so `bytes[2]` is the manufacturer ID and `bytes[3]` the first payload byte.
 - `0x7D` survives the trip unaltered, so dispatching on the ID byte works.
 
+**A DAW control surface's output arrives the same way.** Confirmed separately with
+Ableton Live driving the E16 through a Remote Script: moving a parameter in Live raised
+`onSysex` on the device. So a script can be fed by an ordinary host application, not only
+by a dedicated SysEx utility.
+
 Still unmeasured: whether the other transports in the `output` list — TRS, BLE — deliver
 inbound SysEx too. Only USB has been tried.
 :::
