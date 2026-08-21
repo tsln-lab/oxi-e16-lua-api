@@ -373,12 +373,13 @@ class OxiE16(ControlSurface):
                 continue
             self._listen(track, "name", self._on_names_changed)
 
-            # Top-down, in the order Live's own mixer shows them: pan above the sends,
-            # sends in A-to-B order, fader at the bottom.
-            strip = [(mixer.panning, "Pan")]
+            # Top-down: the sends in A-to-B order, then pan, then the fader at the
+            # bottom. Reorder these lines to move a control; nothing else depends on it.
+            strip = []
             for send in range(SENDS):
                 strip.append((sends[send], labels[send])
                              if send < len(sends) else None)
+            strip.append((mixer.panning, "Pan"))
             strip.append((mixer.volume, abbreviate(track.name)))
 
             for row, entry in enumerate(strip[:ROWS]):
