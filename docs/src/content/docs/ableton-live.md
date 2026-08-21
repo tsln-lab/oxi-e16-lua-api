@@ -221,7 +221,7 @@ non-commercial use. Values are 14-bit, split MSB-first into two 7-bit bytes
 
 | Cmd | Payload | Meaning |
 |---|---|---|
-| `0x10` | page, slot, hi, lo | Encoder turned |
+| `0x12` | page, slot, increment | Encoder turned, by this much |
 | `0x11` | page | Send me this page's state |
 
 `slot` is 0-based (script ID − 1). The E16 sends `0x11` from `onInit` and on every page
@@ -239,18 +239,32 @@ setter and **does not raise `onEncoderTurn`**
 ([controller](/oxi-e16-lua-api/api/controller/)), so writing a value from Live cannot bounce
 straight back out as a turn.
 
-## Resolution
+## Relative, not absolute
 
-The assignments declare `l=0 h=127`, so `enc.scaled * 129` covers the full 14-bit range
-exactly (`127 × 129 = 16383`). That matches ordinary MIDI resolution — fine for a filter
-sweep, coarse for a long delay time.
+The encoders are `manual=true` and report **how far they were turned**, not where they
+ended up. Live decides what one increment is worth. Three things follow.
 
-The wire protocol is 14-bit throughout, so **Live → E16** is already high-resolution:
-automation moves the ring smoothly regardless. Only the encoder's own output is quantized to
-128 steps, and whether anything finer is reachable at all depends on
-[open question 12](/oxi-e16-lua-api/open-questions/) — how a detent's step size relates to
-the declared range. If the step turns out to be a fixed internal amount, raising `h` buys no
-extra distinct values and 128 steps is simply what a script-side encoder gives you.
+**Resolution stops being a wire problem.** An absolute value has to fit in MIDI data bytes;
+an increment does not, so the step is a free choice. A continuous parameter crosses its
+range in `CONTINUOUS_STEPS` (256) increments — twice the old resolution — while the E16's
+acceleration still sends ±8 on a fast turn, keeping a full sweep at roughly 32 quick
+detents. [Open question 12](/oxi-e16-lua-api/open-questions/), on how a detent's step size
+relates to `l`/`h`, stops mattering here: the script never uses `enc.scaled`.
+
+**Stepped parameters land cleanly.** One increment is one option, so a five-way selector
+takes five detents rather than scrubbing through a range.
+
+**Nothing jumps.** An absolute encoder and a parameter can disagree — after automation
+moves it, or on switching pages — and the next touch snaps the value to wherever the knob
+happened to be. A relative encoder has no position of its own to disagree with.
+
+The cost is that nothing moves until Live answers, roughly one 100 ms tick. In manual mode
+the firmware maintains no value, so both the value and the ring come back over the wire.
+
+Live's own scripts scale sensitivity per parameter too, but those numbers feed Live's
+internal relative-CC handling rather than a value delta, so they are not reusable here.
+The structure is borrowed — continuous versus stepped, a fine-grain factor — the numbers
+are not, and this does not claim to match Push's feel.
 
 ## Feedback and flooding
 
@@ -289,12 +303,23 @@ when the mapped output value changes** ([Callbacks](/oxi-e16-lua-api/callbacks/)
   [`tests/sysex_in_probe.lua`](https://github.com/tsln-lab/oxi-e16-lua-api/blob/main/tests/sysex_in_probe.lua)
   in a spare scene — it counts inbound messages in the header, which separates "nothing is
   arriving" from "the protocol is wrong".
-- **Sixteen parameters, starting after the on/off switch.** Live puts that switch at
-  `parameters[0]` on every device, and it is not worth an encoder — `SKIP_PARAMS` at the
-  top of `oxi_e16.py` drops it, and setting it to `0` puts it back. Beyond that there is no
-  banking, so devices with more parameters are truncated; page changes could select banks,
-  since `onPageChange` already fires a resync. The mixer banks four tracks per page, so
-  that limit only bites on devices.
+- **Sixteen parameters, in Live's curated order.** Raw `device.parameters` order is close
+  to arbitrary on a large device, so the page uses Live's own hand-picked banks — the
+  eight-per-device that Push shows — taking them in order, then appending whatever is left
+  so no encoder is wasted. Devices with no curated bank keep raw order. The on/off switch
+  at `parameters[0]` is dropped either way (`SKIP_PARAMS`).
+
+  The banks are **imported from the running Live**, not copied into this repo:
+
+  ```python
+  from ableton.v3.control_surface.default_bank_definitions import BANK_DEFINITIONS
+  ```
+
+  The script runs inside Live, so the table is right there — always matching the installed
+  version, and none of Ableton's data is redistributed. Missing on older installs, where
+  the fallback is raw order. Beyond the first sixteen there is still no device banking;
+  page changes could select banks, since `onPageChange` already fires a resync. The mixer
+  banks four tracks per page, so that limit only bites on devices.
 - **Names, not values.** An encoder has one 4-character label, so the name is on the screen
   and the value is on the ring. Since 1.2.0 it could do both:
   [`slots`](/oxi-e16-lua-api/api/slots/) documents a `system.update()` countdown that shows

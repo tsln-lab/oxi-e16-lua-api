@@ -24,6 +24,16 @@ try:
 except ImportError:  # pragma: no cover - Live 9 and earlier
     from _Framework.ControlSurface import ControlSurface
 
+# Live ships its own curated parameter banks — the hand-picked eight per device that Push
+# shows instead of raw parameter order. Imported from the running Live rather than copied
+# in: it always matches the installed version, and none of Ableton's data is vendored.
+try:
+    from ableton.v3.control_surface.default_bank_definitions import BANK_DEFINITIONS
+    from ableton.v3.control_surface import BANK_PARAMETERS_KEY
+except ImportError:  # pragma: no cover - older Live, or a stripped install
+    BANK_DEFINITIONS = {}
+    BANK_PARAMETERS_KEY = "parameters"
+
 # Flip to True and restart Live to trace the inbound path in Live's Log.txt. Every message
 # the script receives is logged raw, and every parameter write reports what it did. That
 # separates the three ways this direction can fail: nothing reaches Live at all, something
@@ -39,8 +49,23 @@ CMD_VALUE = 0x03   # slot, value -- parameter moved in Live
 CMD_CLEAR = 0x04   # this script is going away
 
 # E16 -> Live
-CMD_SET = 0x10     # slot, value -- encoder turned on the controller
-CMD_HELLO = 0x11   # send me the current device
+CMD_HELLO = 0x11   # page -- send me this page's state
+CMD_NUDGE = 0x12   # page, slot, increment -- encoder turned, biased by NUDGE_BIAS
+
+# Increments are signed and SysEx data bytes are not, so they travel biased.
+NUDGE_BIAS = 64
+NUDGE_LIMIT = NUDGE_BIAS - 1
+
+# How many increments of 1 cross a continuous parameter's full range. Relative encoding
+# means resolution is no longer capped by what fits in a MIDI data byte, so this is a free
+# choice rather than a constraint: 256 is twice the old absolute resolution, and the E16's
+# acceleration still sends +/-8 on a fast turn, so a full sweep stays about 32 quick
+# detents.
+#
+# Live's own scripts scale sensitivity per parameter too, but their numbers feed Live's
+# internal relative-CC handling rather than a value delta, so they are not reusable here.
+# The structure is borrowed; the numbers are not.
+CONTINUOUS_STEPS = 256
 
 # Live puts the device on/off switch at parameters[0] on every device. It is not worth one
 # of sixteen encoders, so the slots start after it. Set to 0 to include it again.
@@ -56,7 +81,20 @@ SLOTS = STRIPS * ROWS  # encoders on an E16
 
 # What one encoder is bound to. `quantized` is resolved once at bind time because it needs
 # the owning device, which the slot table does not otherwise keep.
-Slot = namedtuple("Slot", "parameter label color quantized")
+Slot = namedtuple("Slot", "parameter label color quantized step")
+
+
+def step_for(parameter, quantized):
+    """How far one increment of 1 moves this parameter."""
+    try:
+        span = parameter.max - parameter.min
+    except (RuntimeError, AttributeError, TypeError):
+        return 0.0
+    if span <= 0:
+        return 0.0
+    # Quantized parameters are integer-valued between min and max, so one increment is
+    # one option -- which is what makes a selector land cleanly instead of scrubbing.
+    return 1.0 if quantized else span / float(CONTINUOUS_STEPS)
 
 # E16 page 1 shows the selected device; pages 2 and up are mixer banks of STRIPS tracks.
 # Pages are the device's own mode mechanism, and onPageChange already fires a resync.
@@ -147,6 +185,44 @@ UNDECLARED_QUANTIZED_PARAMETERS = {
     "OriginalSimpler": ("L Sync Rate",),
     "Phaser": ("LFO Sync Rate",),
 }
+
+
+def ordered_parameters(device):
+    """Device parameters in Live's curated order, best first, then whatever is left.
+
+    Raw `device.parameters` order is close to arbitrary for a large device. Live keeps
+    hand-picked banks per device class for exactly this reason; where one exists it goes
+    first, and the remaining parameters follow so no encoder is wasted.
+    """
+    try:
+        params = [p for p in device.parameters]
+    except (RuntimeError, AttributeError):
+        return []
+
+    banks = BANK_DEFINITIONS.get(getattr(device, "class_name", None))
+    if not banks:
+        return params[SKIP_PARAMS:]
+
+    by_name = {}
+    for param in params:
+        try:
+            by_name.setdefault(param.name, param)
+        except (RuntimeError, AttributeError):
+            pass
+
+    ordered, taken = [], set()
+    for bank in banks.values():
+        # A bank pads with empty names where it has fewer than eight, and a parameter can
+        # appear in more than one bank, so skip both.
+        for name in bank.get(BANK_PARAMETERS_KEY, ()):
+            param = by_name.get(name) if name else None
+            if param is not None and id(param) not in taken:
+                taken.add(id(param))
+                ordered.append(param)
+    for param in params[SKIP_PARAMS:]:
+        if id(param) not in taken:
+            ordered.append(param)
+    return ordered
 
 
 def is_quantized(parameter, device):
@@ -497,16 +573,13 @@ class OxiE16(ControlSurface):
         if device is None:
             return slots, NO_DEVICE_TITLE
         self._listen(device, "name", self._on_appearance_changed)
-        try:
-            params = list(device.parameters)[SKIP_PARAMS:][:SLOTS]
-        except (RuntimeError, AttributeError):
-            params = []
-        for slot, param in enumerate(params):
+        for slot, param in enumerate(ordered_parameters(device)[:SLOTS]):
             # Device pages leave the rings to the firmware: there is no track colour that
             # belongs to an individual parameter, and not owning them means nothing to
             # reset on the way out.
-            slots[slot] = Slot(param, abbreviate(param.name), NO_COLOR,
-                               is_quantized(param, device))
+            quantized = is_quantized(param, device)
+            slots[slot] = Slot(param, abbreviate(param.name), NO_COLOR, quantized,
+                               step_for(param, quantized))
         try:
             title = _ascii(device.name, TITLE_CHARS) or NO_DEVICE_TITLE
         except (RuntimeError, AttributeError):
@@ -549,7 +622,9 @@ class OxiE16(ControlSurface):
             for row, entry in enumerate(strip[:ROWS]):
                 if entry is not None:
                     param, label = entry
-                    entry = Slot(param, label, color, is_quantized(param, None))
+                    quantized = is_quantized(param, None)
+                    entry = Slot(param, label, color, quantized,
+                                 step_for(param, quantized))
                 slots[row * STRIPS + column] = entry
 
         return slots, "Mix %d-%d" % (first + 1, first + len(visible))
@@ -592,7 +667,7 @@ class OxiE16(ControlSurface):
         if command == CMD_HELLO and len(midi_bytes) >= 5:
             self._set_page(midi_bytes[3])
             self._request_full()
-        elif command == CMD_SET and len(midi_bytes) >= 8:
+        elif command == CMD_NUDGE and len(midi_bytes) >= 7:
             page, slot = midi_bytes[3], midi_bytes[4]
             if page != self._page:
                 # The E16 changed page and this turn beat the hello. Catch up and drop
@@ -601,7 +676,7 @@ class OxiE16(ControlSurface):
                 self._debug("turn from page %d, expected %d" % (page, self._page))
                 self._set_page(page)
                 return
-            self._apply(slot, (midi_bytes[5] << 7) | midi_bytes[6])
+            self._nudge(slot, midi_bytes[5] - NUDGE_BIAS)
         else:
             self._debug("unhandled command %02X, %d bytes" % (command, len(midi_bytes)))
 
@@ -652,11 +727,20 @@ class OxiE16(ControlSurface):
             return 0
         return max(0, min(MAX_14, int(round(fraction * MAX_14))))
 
-    def _apply(self, slot, value14):
+    def _nudge(self, slot, increment):
+        """Move a parameter by a turn of the encoder.
+
+        The controller sends how far it was turned, not where it ended up, so resolution
+        is set here rather than by what fits in a MIDI data byte — and there is no jump
+        when a parameter's value and the encoder's position disagree, because the encoder
+        no longer has a position of its own.
+        """
         entry = self._slot_at(slot)
         param = entry.parameter if entry is not None else None
         if param is None:
             self._debug("nothing bound to slot %d on page %d" % (slot, self._page))
+            return
+        if not increment or not entry.step:
             return
         try:
             if not getattr(param, "is_enabled", True):
@@ -664,19 +748,12 @@ class OxiE16(ControlSurface):
                 self._debug("%r is not enabled, ignoring" % (param.name,))
                 return
             low, high = param.min, param.max
-            if high <= low:
-                return
-            value = low + (high - low) * (max(0, min(MAX_14, value14)) / float(MAX_14))
+            value = param.value + increment * entry.step
             if entry.quantized:
                 value = round(value)
             param.value = max(low, min(high, value))
-            self._debug("set %r to %s (from 14-bit %d, range %s..%s)"
-                        % (param.name, param.value, value14, low, high))
+            self._debug("nudged %r by %d to %s" % (param.name, increment, param.value))
         except (RuntimeError, AttributeError, TypeError) as err:
-            self._log("cannot set slot %d: %s" % (slot, err))
-            return
-        # Record what the controller asked for so the resulting value listener does not
-        # echo it straight back. If Live snapped the value (quantized parameters do),
-        # the encoded result differs and _send_value pushes the correction -- which is
-        # what makes the LED ring show where the parameter actually landed.
-        self._sent[slot] = max(0, min(MAX_14, value14))
+            self._log("cannot move slot %d: %s" % (slot, err))
+        # No echo suppression here, unlike an absolute write: the controller does not know
+        # where the parameter landed, so it needs the value back to draw its ring.

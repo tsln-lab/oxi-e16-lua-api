@@ -52,32 +52,36 @@
 --
 -- Build with: mise exec -- lua build.lua
 
---@assign id=1  abbr="P1"  name="Param 1"  l=0 h=127 dis=0
---@assign id=2  abbr="P2"  name="Param 2"  l=0 h=127 dis=0
---@assign id=3  abbr="P3"  name="Param 3"  l=0 h=127 dis=0
---@assign id=4  abbr="P4"  name="Param 4"  l=0 h=127 dis=0
---@assign id=5  abbr="P5"  name="Param 5"  l=0 h=127 dis=0
---@assign id=6  abbr="P6"  name="Param 6"  l=0 h=127 dis=0
---@assign id=7  abbr="P7"  name="Param 7"  l=0 h=127 dis=0
---@assign id=8  abbr="P8"  name="Param 8"  l=0 h=127 dis=0
---@assign id=9  abbr="P9"  name="Param 9"  l=0 h=127 dis=0
---@assign id=10 abbr="P10" name="Param 10" l=0 h=127 dis=0
---@assign id=11 abbr="P11" name="Param 11" l=0 h=127 dis=0
---@assign id=12 abbr="P12" name="Param 12" l=0 h=127 dis=0
---@assign id=13 abbr="P13" name="Param 13" l=0 h=127 dis=0
---@assign id=14 abbr="P14" name="Param 14" l=0 h=127 dis=0
---@assign id=15 abbr="P15" name="Param 15" l=0 h=127 dis=0
---@assign id=16 abbr="P16" name="Param 16" l=0 h=127 dis=0
+--@assign id=1  abbr="P1"  name="Param 1"  l=0 h=127 dis=0 manual=true
+--@assign id=2  abbr="P2"  name="Param 2"  l=0 h=127 dis=0 manual=true
+--@assign id=3  abbr="P3"  name="Param 3"  l=0 h=127 dis=0 manual=true
+--@assign id=4  abbr="P4"  name="Param 4"  l=0 h=127 dis=0 manual=true
+--@assign id=5  abbr="P5"  name="Param 5"  l=0 h=127 dis=0 manual=true
+--@assign id=6  abbr="P6"  name="Param 6"  l=0 h=127 dis=0 manual=true
+--@assign id=7  abbr="P7"  name="Param 7"  l=0 h=127 dis=0 manual=true
+--@assign id=8  abbr="P8"  name="Param 8"  l=0 h=127 dis=0 manual=true
+--@assign id=9  abbr="P9"  name="Param 9"  l=0 h=127 dis=0 manual=true
+--@assign id=10 abbr="P10" name="Param 10" l=0 h=127 dis=0 manual=true
+--@assign id=11 abbr="P11" name="Param 11" l=0 h=127 dis=0 manual=true
+--@assign id=12 abbr="P12" name="Param 12" l=0 h=127 dis=0 manual=true
+--@assign id=13 abbr="P13" name="Param 13" l=0 h=127 dis=0 manual=true
+--@assign id=14 abbr="P14" name="Param 14" l=0 h=127 dis=0 manual=true
+--@assign id=15 abbr="P15" name="Param 15" l=0 h=127 dis=0 manual=true
+--@assign id=16 abbr="P16" name="Param 16" l=0 h=127 dis=0 manual=true
 
 local SYX   = 0x7D   -- SysEx ID 0x7D: reserved for non-commercial use
 local OUT   = 0      -- 0 = all outputs
 local SLOTS = 16
 local BLANK = "-"    -- label for a slot the device has no parameter for
 
--- Encoders are declared l=0 h=127, so `enc.scaled` is 0..127 and one detent is one step.
--- 127 * 129 == 16383 exactly, so scaling by STEP maps a full encoder sweep onto the full
--- 14-bit range the protocol carries. See the docs page for why h is not 16383.
-local STEP = 129
+-- The encoders are `manual=true`: the firmware stores nothing and hands the raw turn to
+-- the script, which reports it to Live as an increment rather than a value. Live decides
+-- how far one increment moves a parameter, so resolution is not capped by what fits in a
+-- MIDI data byte, and there is no jump when a parameter and an encoder disagree — the
+-- encoder has no position of its own to disagree with.
+--
+-- The cost is that nothing moves until Live answers. In manual mode the firmware stops
+-- maintaining the internal value, so both the ring and the value come back over the wire.
 
 -- Live -> E16
 local CMD_DEVICE = 0x01  -- device name, for the header
@@ -86,8 +90,12 @@ local CMD_VALUE  = 0x03  -- slot, value — parameter moved in Live
 local CMD_CLEAR  = 0x04  -- Live disconnected
 
 -- E16 -> Live
-local CMD_SET   = 0x10   -- slot, value — encoder turned here
-local CMD_HELLO = 0x11   -- send me the current device
+local CMD_HELLO = 0x11   -- page — send me this page's state
+local CMD_NUDGE = 0x12   -- page, slot, increment — encoder turned here
+
+-- Increments are signed and SysEx data bytes are not, so they travel biased by 64.
+local BIAS  = 64
+local LIMIT = 63
 
 -- Read ASCII bytes from `from` up to the byte before the closing 0xF7.
 local function text(b, from)
@@ -151,16 +159,21 @@ function controller.onEncoderTurn(enc)
     local id = enc.id
     if not id or id < 1 or id > SLOTS then return end
 
-    -- The page travels with the value. Slot 3 is a device parameter on page 1 and a
-    -- track's pan on page 2, so a turn that arrived before Live processed the page change
-    -- would otherwise be applied to the wrong thing entirely.
-    local v = enc.scaled * STEP
-    midi.sendSysex(OUT,
-        { 0xF0, SYX, CMD_SET, enc.page or 1, id - 1, v // 128, v % 128, 0xF7 })
+    -- `increment` is 0 when no physical turn produced the event — a group slave move, for
+    -- instance. Reporting those would nudge a parameter nobody touched.
+    local d = enc.increment or 0
+    if d == 0 then return end
+    if d > LIMIT then d = LIMIT elseif d < -LIMIT then d = -LIMIT end
 
-    -- On a ring we own the firmware no longer redraws from the value it just stored, so
-    -- the turn would not move the ring at all without this.
-    paint(id, enc.value)
+    -- The page travels with the turn. Slot 3 is a device parameter on page 1 and a track's
+    -- pan on page 2, so a turn that arrived before Live processed the page change would
+    -- otherwise be applied to the wrong thing entirely.
+    midi.sendSysex(OUT,
+        { 0xF0, SYX, CMD_NUDGE, enc.page or 1, id - 1, BIAS + d, 0xF7 })
+
+    -- Deliberately no local repaint: in manual mode the stored value is only ever what
+    -- Live last sent, so drawing it again would just redraw the old position. The ring
+    -- moves when the value comes back.
 end
 
 function controller.onSysex(b)
@@ -196,7 +209,7 @@ function controller.onSysex(b)
         release_rings()
         blank_all()
     end
-    -- CMD_SET and CMD_HELLO are ours, outbound only. Ignoring them means a MIDI loopback
+    -- CMD_NUDGE and CMD_HELLO are ours, outbound only. Ignoring them means a MIDI loopback
     -- cannot make the script talk to itself.
     --
     -- Nor can a value from Live: 1.2.0 states that `controller.set` is a direct setter and

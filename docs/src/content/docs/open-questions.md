@@ -96,6 +96,10 @@ them.
    Test: two otherwise identical controls, `h=127` and `h=16383`, and count the detents
    each needs to travel end to end. `onEncoderTurn` firing only when the mapped value
    changes ([Callbacks](/oxi-e16-lua-api/callbacks/)) makes the count easy to read off.
+   Sidestepped rather than answered by the [Live integration](/oxi-e16-lua-api/ableton-live/),
+   which went `manual=true` and reports `enc.increment` instead of reading `enc.scaled` —
+   worth knowing that a script needing resolution has that option regardless of how this
+   resolves.
 
 ## Closed by 1.2.0
 
