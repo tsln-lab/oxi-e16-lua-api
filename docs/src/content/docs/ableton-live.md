@@ -33,14 +33,14 @@ only the page you are looking at is visible anyway. Each page change repaints fo
 ### The mixer layout
 
 The E16's encoders are a 4×4 grid numbered left to right, top row first, so a column is
-`{1, 5, 9, 13}`. Each column is one track, read **bottom-up like a channel strip** — the
-fader at the bottom, sends climbing away from it:
+`{1, 5, 9, 13}`. Each column is one track, in the order **Live's own mixer shows them** —
+pan above the sends, sends in A-to-B order, fader at the bottom:
 
 | Row | Encoders | Control |
 |---|---|---|
-| Top | 1–4 | Send B |
+| Top | 1–4 | Pan |
 | | 5–8 | Send A — labelled from the return track |
-| | 9–12 | Pan |
+| | 9–12 | Send B |
 | Bottom | 13–16 | Volume — labelled with the track name |
 
 Send labels drop Live's leading letter designator, since "A Reverb" would spend half of
