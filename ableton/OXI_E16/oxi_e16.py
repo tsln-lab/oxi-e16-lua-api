@@ -372,11 +372,17 @@ class OxiE16(ControlSurface):
             except (RuntimeError, AttributeError):
                 continue
             self._listen(track, "name", self._on_names_changed)
-            slots[column] = (mixer.volume, abbreviate(track.name))
-            slots[STRIPS + column] = (mixer.panning, "Pan")
+
+            # Built bottom-up, the way a channel strip reads: the fader is at the bottom
+            # and the sends climb away from it.
+            strip = [(mixer.volume, abbreviate(track.name)), (mixer.panning, "Pan")]
             for send in range(SENDS):
-                if send < len(sends):
-                    slots[(2 + send) * STRIPS + column] = (sends[send], labels[send])
+                strip.append((sends[send], labels[send])
+                             if send < len(sends) else None)
+
+            # Row 0 is the top of the grid, so the strip goes in reversed.
+            for height, entry in enumerate(strip[:ROWS]):
+                slots[(ROWS - 1 - height) * STRIPS + column] = entry
 
         return slots, "Mix %d-%d" % (first + 1, first + len(visible))
 
