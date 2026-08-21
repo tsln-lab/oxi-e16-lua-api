@@ -14,6 +14,7 @@ Pairs with `scripts/live-device.lua`. Protocol reference:
 https://tsln-lab.github.io/oxi-e16-lua-api/ableton-live/
 """
 
+import logging
 import re
 
 try:
@@ -136,7 +137,9 @@ class OxiE16(ControlSurface):
         ControlSurface.disconnect(self)
 
     def refresh_state(self):
-        ControlSurface.refresh_state(self)
+        inherited = getattr(ControlSurface, "refresh_state", None)
+        if inherited is not None:
+            inherited(self)
         self._request_full()
 
     def update_display(self):
@@ -156,11 +159,30 @@ class OxiE16(ControlSurface):
                 for slot in dirty:
                     self._send_value(slot)
         except Exception as err:  # never let the tick die
-            self.log_message("OXI E16: update_display failed: %s" % (err,))
+            self._log("update_display failed: %s" % (err,))
+
+    def _log(self, message):
+        """Write to Live's Log.txt, and never raise.
+
+        `ControlSurface.log_message` exists in `_Framework` but not in `ableton.v2`, where
+        logging moved to the standard `logging` module. This is called from `except`
+        blocks, so it has to survive both — a logger that raises substitutes its own error
+        for the one being reported, and the original is lost.
+        """
+        text = "OXI E16: " + message
+        try:
+            self._c.log_message(text)
+            return
+        except Exception:
+            pass
+        try:
+            logging.getLogger(__name__).info(text)
+        except Exception:
+            pass
 
     def _debug(self, message):
         if DEBUG:
-            self.log_message("OXI E16: " + message)
+            self._log(message)
 
     def receive_midi(self, midi_bytes):
         if DEBUG:
@@ -173,7 +195,7 @@ class OxiE16(ControlSurface):
             try:
                 self._handle_sysex(midi_bytes)
             except Exception as err:
-                self.log_message("OXI E16: bad sysex %r: %s" % (midi_bytes, err))
+                self._log("bad sysex %r: %s" % (midi_bytes, err))
         # Anything else is ignored on purpose: this script defines no control elements,
         # so there is nothing for the base class to dispatch a CC or note to.
 
@@ -181,7 +203,12 @@ class OxiE16(ControlSurface):
         # Live delivers batched MIDI here in some versions; the base class fans it out to
         # receive_midi. Logged so a silent path shows up as silence in one place only.
         self._debug("rx chunk of %d" % len(midi_chunk))
-        ControlSurface.receive_midi_chunk(self, midi_chunk)
+        inherited = getattr(ControlSurface, "receive_midi_chunk", None)
+        if inherited is not None:
+            inherited(self, midi_chunk)
+        else:
+            for midi_bytes in midi_chunk:
+                self.receive_midi(midi_bytes)
 
     # -- selection tracking -----------------------------------------------------
 
@@ -190,7 +217,7 @@ class OxiE16(ControlSurface):
             self._song().view.add_selected_track_listener(self._on_track_changed)
             self._song_listener_added = True
         except (RuntimeError, AttributeError) as err:
-            self.log_message("OXI E16: cannot follow track selection: %s" % (err,))
+            self._log("cannot follow track selection: %s" % (err,))
         self._on_track_changed()
 
     def _disconnect_track(self):
@@ -291,7 +318,7 @@ class OxiE16(ControlSurface):
         try:
             self._send_midi(tuple([0xF0, SYSEX_ID, command] + list(payload) + [0xF7]))
         except Exception as err:
-            self.log_message("OXI E16: send failed: %s" % (err,))
+            self._log("send failed: %s" % (err,))
 
     def _request_full(self):
         self._pending_full = True
@@ -365,7 +392,7 @@ class OxiE16(ControlSurface):
             self._debug("set %r to %s (from 14-bit %d, range %s..%s)"
                         % (param.name, param.value, value14, low, high))
         except (RuntimeError, AttributeError, TypeError) as err:
-            self.log_message("OXI E16: cannot set slot %d: %s" % (slot, err))
+            self._log("cannot set slot %d: %s" % (slot, err))
             return
         # Record what the controller asked for so the resulting value listener does not
         # echo it straight back. If Live snapped the value (quantized parameters do),
