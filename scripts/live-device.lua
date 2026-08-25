@@ -17,6 +17,8 @@
 --@assign id=14 abbr="P14" name="Param 14" l=0 h=127 dis=0 manual=true
 --@assign id=15 abbr="P15" name="Param 15" l=0 h=127 dis=0 manual=true
 --@assign id=16 abbr="P16" name="Param 16" l=0 h=127 dis=0 manual=true
+--@assign id=17 abbr="BK-" name="Bank -" desc="Previous bank of device parameters" p=true
+--@assign id=18 abbr="BK+" name="Bank +" desc="Next bank of device parameters" p=true
 
 -- ===== live-device.lua =====
 -- Ableton Live — device and mixer control for the OXI E16.
@@ -73,6 +75,11 @@
 --
 -- Build with: mise exec -- lua build.lua
 
+-- Push actions, for stepping a device through parameters that do not fit on sixteen
+-- knobs. Drop these on the BOTTOM ROW — "Bank -" on encoder 13, "Bank +" on encoder 16 —
+-- so back and forward read left to right. A push is a separate action from an encoder's
+-- turn destination, so neither costs a parameter.
+
 local SYX   = 0x7D   -- SysEx ID 0x7D: reserved for non-commercial use
 local OUT   = 0      -- 0 = all outputs
 local SLOTS = 16
@@ -96,6 +103,10 @@ local CMD_CLEAR  = 0x04  -- Live disconnected
 -- E16 -> Live
 local CMD_HELLO = 0x11   -- page — send me this page's state
 local CMD_NUDGE = 0x12   -- page, slot, increment — encoder turned here
+local CMD_BANK  = 0x13   -- page, delta — bank button pressed here
+
+local BANK_PREV = 17     -- script IDs of the two push actions
+local BANK_NEXT = 18
 
 -- Increments are signed and SysEx data bytes are not, so they travel biased by 64.
 local BIAS  = 64
@@ -219,6 +230,20 @@ function controller.onSysex(b)
     -- Nor can a value from Live: 1.2.0 states that `controller.set` is a direct setter and
     -- does not raise `onEncoderTurn`, so writing a value here cannot bounce back out as a
     -- CMD_SET. The echo suppression that matters is all on the Live side.
+end
+
+function controller.onEncoderPress(enc)
+    -- A device with more than sixteen parameters is shown a bank at a time; these step
+    -- between them. Live ignores the press on mixer pages, which bank by page instead.
+    local d
+    if enc.id == BANK_NEXT then
+        d = 1
+    elseif enc.id == BANK_PREV then
+        d = -1
+    else
+        return
+    end
+    midi.sendSysex(OUT, { 0xF0, SYX, CMD_BANK, enc.page or 1, BIAS + d, 0xF7 })
 end
 
 function page.onPageChange(previous, current)

@@ -45,6 +45,27 @@ bottom:
 
 The order is a plain list in `_mixer_slots`, so moving a control is reordering a line.
 
+### Stepping through a big device
+
+Sixteen knobs do not cover an Operator. **The bottom row steps between banks** — press
+encoder 13 for the previous, encoder 16 for the next, so back and forward read left to
+right. A push is a separate action from an encoder's turn destination, so neither costs a
+parameter; drop `Bank -` and `Bank +` onto those two encoders.
+
+The header counts them, `Operator 2/3`, since the labels change but nothing else says how
+far through the device you are. A device that fits on one page shows no counter.
+
+The bank belongs to the device: selecting a different one starts at its first bank, while
+staying on one keeps your place across a rename, a value move, or a trip to the mixer and
+back. Bank presses are ignored on mixer pages, which bank by page instead.
+
+:::caution[A Special function eats the push]
+The per-encoder *Special* setting — Snapshot Morph, Looper, Random, Swap Destination —
+consumes the push action, and a script never sees it
+([device context](/oxi-e16-lua-api/device-context/)). If a bank button does nothing, check
+that first.
+:::
+
 ### Ring colours
 
 Each column is tinted with its track's colour in Live, so a strip reads as one track. This
@@ -223,6 +244,7 @@ non-commercial use. Values are 14-bit, split MSB-first into two 7-bit bytes
 | Cmd | Payload | Meaning |
 |---|---|---|
 | `0x12` | page, slot, increment | Encoder turned, by this much |
+| `0x13` | page, delta | Bank button pressed |
 | `0x11` | page | Send me this page's state |
 
 `slot` is 0-based (script ID − 1). The E16 sends `0x11` from `onInit` and on every page
@@ -334,8 +356,7 @@ when the mapped output value changes** ([Callbacks](/oxi-e16-lua-api/callbacks/)
   whether `DeviceParameter` supports it is unverified; attaching costs nothing and is
   skipped with a note under `DEBUG` if the method is absent. Check Log.txt for
   `cannot listen for name` to find out which route is doing the work. Beyond the first sixteen there is still no device banking;
-  page changes could select banks, since `onPageChange` already fires a resync. The mixer
-  banks four tracks per page, so that limit only bites on devices.
+  Parameters past the first sixteen are reached with the bank buttons above.
 - **Names, not values.** An encoder has one 4-character label, so the name is on the screen
   and the value is on the ring. Since 1.2.0 it could do both:
   [`slots`](/oxi-e16-lua-api/api/slots/) documents a `system.update()` countdown that shows

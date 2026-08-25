@@ -51,6 +51,7 @@ CMD_CLEAR = 0x04   # this script is going away
 # E16 -> Live
 CMD_HELLO = 0x11   # page -- send me this page's state
 CMD_NUDGE = 0x12   # page, slot, increment -- encoder turned, biased by NUDGE_BIAS
+CMD_BANK = 0x13    # page, delta -- bank button pressed, biased the same way
 
 # Increments are signed and SysEx data bytes are not, so they travel biased.
 NUDGE_BIAS = 64
@@ -338,6 +339,9 @@ class OxiE16(ControlSurface):
         ControlSurface.__init__(self, c_instance, *a, **k)
         self._c = c_instance
         self._page = DEVICE_PAGE
+        self._bank = 0            # which window of the device's parameters is showing
+        self._banks = 1
+        self._bound_device = None
         # One entry per encoder: (parameter, label, colour), or None where the page has
         # nothing.
         # Mixer controls are DeviceParameters too, so everything downstream -- reading,
@@ -607,12 +611,24 @@ class OxiE16(ControlSurface):
         except (RuntimeError, AttributeError):
             device = None
         if device is None:
+            self._bound_device = None
+            self._bank = 0
+            self._banks = 1
             return slots, NO_DEVICE_TITLE
+        # Selecting a different device starts at its first bank; staying on one keeps the
+        # bank across a rename, a value move, or a trip to the mixer and back.
+        if device is not self._bound_device:
+            self._bound_device = device
+            self._bank = 0
         self._listen(device, "name", self._on_appearance_changed)
         # The parameter list itself can change under a device — a rack gaining macros, a
         # Simpler becoming a Sampler. Live's own components watch this and nothing finer.
         self._listen(device, "parameters", self._schedule_rebind)
-        for slot, param in enumerate(ordered_parameters(device)[:SLOTS]):
+        params = ordered_parameters(device)
+        self._banks = max(1, (len(params) + SLOTS - 1) // SLOTS)
+        self._bank = max(0, min(self._banks - 1, self._bank))
+        window = params[self._bank * SLOTS:(self._bank + 1) * SLOTS]
+        for slot, param in enumerate(window):
             # Device pages leave the rings to the firmware: there is no track colour that
             # belongs to an individual parameter, and not owning them means nothing to
             # reset on the way out.
@@ -627,6 +643,12 @@ class OxiE16(ControlSurface):
                                step_for(param, quantized))
         try:
             title = _ascii(device.name, TITLE_CHARS) or NO_DEVICE_TITLE
+            if self._banks > 1:
+                # Which bank you are on is not otherwise visible: the labels change but
+                # nothing says how far through the device they are.
+                counter = " %d/%d" % (self._bank + 1, self._banks)
+                title = (_ascii(device.name, TITLE_CHARS - len(counter))
+                         or NO_DEVICE_TITLE) + counter
         except (RuntimeError, AttributeError):
             title = NO_DEVICE_TITLE
         return slots, title
@@ -722,6 +744,12 @@ class OxiE16(ControlSurface):
                 self._set_page(page)
                 return
             self._nudge(slot, midi_bytes[5] - NUDGE_BIAS)
+        elif command == CMD_BANK and len(midi_bytes) >= 6:
+            page = midi_bytes[3]
+            if page != self._page:
+                self._set_page(page)
+                return
+            self._shift_bank(midi_bytes[4] - NUDGE_BIAS)
         else:
             self._debug("unhandled command %02X, %d bytes" % (command, len(midi_bytes)))
 
@@ -771,6 +799,19 @@ class OxiE16(ControlSurface):
         except (RuntimeError, AttributeError, TypeError):
             return 0
         return max(0, min(MAX_14, int(round(fraction * MAX_14))))
+
+    def _shift_bank(self, delta):
+        """Step the device page through the parameters that do not fit on sixteen knobs."""
+        if self._page != DEVICE_PAGE:
+            # The mixer banks by page, so its window is not the script's to move.
+            self._debug("bank change ignored on page %d" % self._page)
+            return
+        if not delta or self._banks <= 1:
+            return
+        bank = max(0, min(self._banks - 1, self._bank + delta))
+        if bank != self._bank:
+            self._bank = bank
+            self._rebind()
 
     def _nudge(self, slot, increment):
         """Move a parameter by a turn of the encoder.
