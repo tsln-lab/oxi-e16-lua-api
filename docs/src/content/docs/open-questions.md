@@ -14,6 +14,11 @@ them.
    color setting are now the same scale, and whether the old readings still hold at all.
    **Re-run `tests/led_color_probe.lua`** — updated for the new
    signature; it sweeps 0–100 across the sixteen rings in six passes.
+   [`tests/led_colour_scrub_probe.lua`](../led_colour_scrub_probe.lua) is the slower
+   companion and the better one for writing the answer down: one knob scrubs the colour of
+   one ring, one value per detent, with the number on screen, so the point where each
+   colour starts can be read off directly. A third knob scales the fill, to check whether
+   colour survives a partial ring as it did under 1.0.0.
 2. **Does writing `v` transmit?** Whether `controller.setByIndex(page, index, "v", …)`
    makes the firmware send an ordinary control's configured MIDI message, or only stores
    the value — and whether it reaches non-script controls at all. This decides whether a
