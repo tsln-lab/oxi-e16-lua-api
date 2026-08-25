@@ -187,6 +187,26 @@ UNDECLARED_QUANTIZED_PARAMETERS = {
 }
 
 
+def bank_name(parameter):
+    """The name a bank definition refers to a parameter by.
+
+    Not the displayed name: mapping a rack macro **renames** it, so a mapped "Macro 1"
+    reports something like "Frequency" and no longer matches its bank entry. Live's own
+    bank resolution matches on `original_name` for this reason
+    (`ableton/v2/control_surface/device_parameter_bank.py`). Matching on the displayed name
+    instead pushes every mapped macro out of the curated order and into the leftovers,
+    which lands them after the unmapped ones.
+    """
+    for attribute in ("original_name", "name"):
+        try:
+            value = getattr(parameter, attribute)
+        except (RuntimeError, AttributeError):
+            continue
+        if value:
+            return value
+    return None
+
+
 def ordered_parameters(device):
     """Device parameters in Live's curated order, best first, then whatever is left.
 
@@ -205,10 +225,9 @@ def ordered_parameters(device):
 
     by_name = {}
     for param in params:
-        try:
-            by_name.setdefault(param.name, param)
-        except (RuntimeError, AttributeError):
-            pass
+        key = bank_name(param)
+        if key is not None:
+            by_name.setdefault(key, param)
 
     ordered, taken = [], set()
     for bank in banks.values():

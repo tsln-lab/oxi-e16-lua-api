@@ -317,7 +317,13 @@ when the mapped output value changes** ([Callbacks](/oxi-e16-lua-api/callbacks/)
 
   The script runs inside Live, so the table is right there — always matching the installed
   version, and none of Ableton's data is redistributed. Missing on older installs, where
-  the fallback is raw order. Beyond the first sixteen there is still no device banking;
+  the fallback is raw order.
+
+  Bank entries are matched against `parameter.original_name`, not `name`: **mapping a rack
+  macro renames it**, so a mapped `Macro 1` reports something like `Frequency` and would
+  miss its own bank entry — pushing every mapped macro out of the curated order and behind
+  the unmapped ones. Live's own bank resolution matches on `original_name` for the same
+  reason. Labels still come from `name`, so a mapped macro reads as what Live shows. Beyond the first sixteen there is still no device banking;
   page changes could select banks, since `onPageChange` already fires a resync. The mixer
   banks four tracks per page, so that limit only bites on devices.
 - **Names, not values.** An encoder has one 4-character label, so the name is on the screen
