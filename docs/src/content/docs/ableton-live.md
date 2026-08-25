@@ -323,7 +323,16 @@ when the mapped output value changes** ([Callbacks](/oxi-e16-lua-api/callbacks/)
   macro renames it**, so a mapped `Macro 1` reports something like `Frequency` and would
   miss its own bank entry — pushing every mapped macro out of the curated order and behind
   the unmapped ones. Live's own bank resolution matches on `original_name` for the same
-  reason. Labels still come from `name`, so a mapped macro reads as what Live shows. Beyond the first sixteen there is still no device banking;
+  reason. Labels still come from `name`, so a mapped macro reads as what Live shows.
+
+  **Renames follow automatically**, by two routes. The device's `parameters` list is the
+  documented signal — it is what Live's own components watch, and nothing finer — and it
+  fires when a device's shape changes, a rack gaining macros or a Simpler becoming a
+  Sampler. Alongside it the script attaches a `name` listener to each bound parameter,
+  which catches a plain rename. **No Live script listens to a parameter's name**, so
+  whether `DeviceParameter` supports it is unverified; attaching costs nothing and is
+  skipped with a note under `DEBUG` if the method is absent. Check Log.txt for
+  `cannot listen for name` to find out which route is doing the work. Beyond the first sixteen there is still no device banking;
   page changes could select banks, since `onPageChange` already fires a resync. The mixer
   banks four tracks per page, so that limit only bites on devices.
 - **Names, not values.** An encoder has one 4-character label, so the name is on the screen

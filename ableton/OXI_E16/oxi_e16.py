@@ -592,10 +592,19 @@ class OxiE16(ControlSurface):
         if device is None:
             return slots, NO_DEVICE_TITLE
         self._listen(device, "name", self._on_appearance_changed)
+        # The parameter list itself can change under a device — a rack gaining macros, a
+        # Simpler becoming a Sampler. Live's own components watch this and nothing finer.
+        self._listen(device, "parameters", self._schedule_rebind)
         for slot, param in enumerate(ordered_parameters(device)[:SLOTS]):
             # Device pages leave the rings to the firmware: there is no track colour that
             # belongs to an individual parameter, and not owning them means nothing to
             # reset on the way out.
+            # Renaming a rack macro should reach the encoder. No Live script listens to a
+            # parameter's name, so whether DeviceParameter supports it is unverified —
+            # `_listen` logs and skips if the method is absent, which costs nothing and
+            # says so under DEBUG. The device-level `parameters` listener above is the
+            # documented signal, and covers a rename that rebuilds the list.
+            self._listen(param, "name", self._on_appearance_changed)
             quantized = is_quantized(param, device)
             slots[slot] = Slot(param, abbreviate(param.name), NO_COLOR, quantized,
                                step_for(param, quantized))
