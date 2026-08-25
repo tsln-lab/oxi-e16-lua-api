@@ -86,7 +86,17 @@ axis only: they are logical ports sharing one physical output (p.18, "may be ide
 |---|---|---|---|---|---|---|---|---|---|
 | All | TRS1 | TRS2 | USB1 | USB2 | USB3 | BLE | ALL-BLE | ALL-USB | Off |
 
-Do not rely on this. `0` is the only safe value until it is measured —
+:::note[Measured 2026-08-20: `0` = All and `3` = USB1]
+Sending SysEx from a script on index **3** reached Ableton Live with **only USB1 enabled**
+in Live's MIDI preferences, so the port was isolated rather than inferred from a global
+input indicator. Index **0** arrives the same way, consistent with its documented "all
+outputs". Both match the hypothesised order below.
+
+The remaining eight entries are still untested, as are TRS and BLE — the two indices
+measured here happen to be the two the guide already effectively gives you.
+:::
+
+Do not rely on the rest. `0` is the only value either document specifies —
 `tests/output_port_probe.lua` does it in one button press by sending a different CC number
 on each index, so every receiver identifies itself. See
 [Open questions](/oxi-e16-lua-api/open-questions/).

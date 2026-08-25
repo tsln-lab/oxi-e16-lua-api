@@ -32,6 +32,7 @@ settled.
 | `build.lua` | Inlines includes and hoists assignments, `src/` → `scripts/` |
 | `scripts/*.lua` | **Generated. Do not edit.** Upload these to the device |
 | `tests/*.lua` | Hardware probes that answer entries in `open-questions.md` |
+| `ableton/OXI_E16/` | Ableton Live Remote Script (Python) — the other half of `src/live-device.lua` |
 | `types/e16.lua` | `---@meta` LuaLS stubs of the API, for editor completion |
 | `.luarc.json` | Points the language server at `types/`, declares the firmware globals |
 | `mise.toml` | Pins Lua for the local syntax checker (not the device runtime) |
