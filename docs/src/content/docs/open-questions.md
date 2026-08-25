@@ -8,10 +8,16 @@ them.
 
 ## Opened or reopened by 1.2.0
 
-1. **LED `color` is now a 0–100 rotation.** 1.0.0 documented a 0–15 palette index, and the
-   measured 16-entry table on [leds](/oxi-e16-lua-api/api/leds/) was taken under that
-   firmware. Unknown: what 16–100 render as, whether the Lua scale and the editor's 0–100
-   color setting are now the same scale, and whether the old readings still hold at all.
+1. **LED `color` is now a 0–100 rotation — partly answered 2026-08-21.** Scrubbing the
+   range on hardware shows it behaves like a **real hue wheel**: stepping by one is
+   perceptually uneven, some steps jumping, some subtle, some indistinguishable, which is
+   what non-uniform hue does and is not what a stretched palette would do
+   ([leds](/oxi-e16-lua-api/api/leds/)). The working consequence is already actionable —
+   neighbouring values cannot be trusted to differ, so colour-coding should spread widely
+   around the scale.
+   Still unknown: how many distinct colours there are and where each band begins, whether
+   the Lua scale and the editor's 0–100 color setting are the same scale, and whether the
+   old 16-entry table on [leds](/oxi-e16-lua-api/api/leds/) relates to it at all.
    **Re-run `tests/led_color_probe.lua`** — updated for the new
    signature; it sweeps 0–100 across the sixteen rings in six passes.
    [`tests/led_colour_scrub_probe.lua`](../led_colour_scrub_probe.lua) is the slower

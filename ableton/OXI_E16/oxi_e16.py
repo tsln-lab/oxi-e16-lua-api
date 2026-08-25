@@ -112,6 +112,16 @@ NO_COLOR = 127
 # Below this, a colour is too close to grey for its hue to mean anything. Chosen against
 # Live's own track palette, where 13 of 70 entries fall below it.
 MIN_SATURATION = 0.25
+
+# How many colours the ring is allowed to use, spread evenly around the rotation.
+#
+# Observed on hardware 2026-08-21: stepping the 0-100 scale by one is perceptually uneven —
+# some steps jump, some are subtle, some look identical. That is what a genuine hue wheel
+# does, since hue is not perceptually uniform, but it means neighbouring values are not
+# reliably distinguishable. Snapping to a few well-separated anchors keeps two different
+# track colours from landing on rings that look the same, whatever the LEDs do between
+# them. Raise it for finer distinctions, lower it if any two still read alike.
+COLOR_ANCHORS = 8
 MAX_14 = 16383     # the E16's internal value range is 14-bit
 TITLE_CHARS = 15   # page.setTitle limit
 LABEL_CHARS = 4    # encoder label limit
@@ -288,7 +298,14 @@ def e16_color(rgb):
         hue = (blue - red) / span + 2
     else:
         hue = (red - green) / span + 4
-    return int(round(hue * 60.0 / 360.0 * 100)) % 100
+
+    rotation = hue * 60.0 / 360.0 * 100.0
+    # Snap to the nearest anchor rather than using the hue directly: neighbouring values on
+    # this scale are not reliably distinguishable, and telling two tracks apart matters
+    # more here than reproducing their exact colour.
+    spacing = 100.0 / COLOR_ANCHORS
+    anchor = int(round(rotation / spacing)) % COLOR_ANCHORS
+    return int(round(anchor * spacing)) % 100
 
 
 def track_color(track):

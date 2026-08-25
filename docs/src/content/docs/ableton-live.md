@@ -64,17 +64,18 @@ is the one place the script takes a ring over: colour is only reachable through
 
 Device pages send no colour and leave the rings to the firmware, so nothing is owned there.
 
-:::caution[The colour mapping is a hypothesis, not a measurement]
-API 1.2.0 redefines `color` as a **0–100 rotation**, replacing 1.0.0's 0–15 palette index
-— and the sixteen-entry palette measured on hardware predates that change, so it no longer
-describes what the argument does ([open question 1](/oxi-e16-lua-api/open-questions/)).
+:::note[The colour mapping, and why it snaps]
+API 1.2.0 redefines `color` as a **0–100 rotation**, replacing 1.0.0's 0–15 palette index.
+Scrubbing the range on hardware confirms it behaves like a real hue wheel, so mapping RGB
+to hue is right in kind ([open question 1](/oxi-e16-lua-api/open-questions/)).
 
-`e16_color()` assumes "rotation" means a hue wheel and maps Live's RGB to hue scaled to
-0–100. That is a guess from the wording. Run
-[`tests/led_color_probe.lua`](https://github.com/tsln-lab/oxi-e16-lua-api/blob/main/tests/led_color_probe.lua),
-which sweeps the whole range across the sixteen rings, and correct that one function —
-nothing else depends on the mapping. `TRACK_COLORS = False` disables the whole feature and
-returns every ring to the firmware.
+What the same test showed is that **stepping is perceptually uneven** — some single steps
+jump, some are invisible. So `e16_color()` does not send the hue directly: it snaps to
+`COLOR_ANCHORS` (8) evenly spaced values, because telling two tracks apart matters more
+here than reproducing either one exactly. Live's 70 track colours land on eight distinct
+rings. Raise the constant for finer distinctions, lower it if any two still read alike.
+
+`TRACK_COLORS = False` disables the feature and returns every ring to the firmware.
 
 **Desaturated tracks keep the firmware's ring.** Live's track palette has 70 entries, of
 which 13 are too close to grey for a hue to mean anything and 5 are pure grey — and every

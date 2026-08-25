@@ -18,6 +18,27 @@ documented a 0–15 palette index. See [Colors](#colors) — the measured palett
 predates this and needs re-running.
 :::
 
+:::note[Observed on hardware, 2026-08-21: it behaves like a real hue wheel]
+Scrubbing 0–100 one value at a time with
+[`led_colour_scrub_probe.lua`](../led_colour_scrub_probe.lua): **stepping is perceptually
+uneven** — some single steps jump, some are subtle, and some look identical. The overall
+impression is a wheel with big jumps in it.
+
+That is what a genuine hue rotation looks like, because hue is not perceptually uniform:
+greens span a wide arc with little apparent change while red through yellow moves fast in a
+narrow one. A small palette stretched over 0–100 would instead give evenly sized plateaus
+and no subtle steps at all, so this argues for a rotation and against the 1.0.0-style
+palette.
+
+**Practical consequence: neighbouring values are not reliably distinguishable.** Anything
+that colour-codes more than a few things should spread its colours widely around the scale
+rather than trusting adjacent numbers to differ — the
+[Live integration](/oxi-e16-lua-api/ableton-live/) snaps track colours to eight evenly
+spaced anchors for this reason.
+
+Still open: how many distinct colours there actually are, and where each band starts.
+:::
+
 ## `leds.update(id, value [, color])`
 
 | Param | Range | Note |
